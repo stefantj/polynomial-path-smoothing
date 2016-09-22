@@ -116,7 +116,7 @@ function solve_poly_problem( orders, time_inds, B_x, B_y, time_vec, q_coeffs,k_T
     A = zeros(0,degree)
     # Point constraints:    
     for k=1:size(B_x,1)
-        A = [A; constr_order(orders[k], time_vec[time_inds[k]], degree)];
+        A = [A; constr_order(orders[k], time_vec[round(Int64,time_inds[k])], degree)];
     end
     # Form Q matrix:
     Q_mat = form_Q(q_coeff, time_vec[end]);
@@ -131,7 +131,7 @@ function solve_poly_problem( orders, time_inds, B_x, B_y, time_vec, q_coeffs,k_T
     
     # Evaluate cost:
     J = x_coeff'*Q_mat*x_coeff + y_coeff'*Q_mat*y_coeff + kT*time_vec[end];
-    return J[1];
+    return J[1],x_coeff,y_coeff;
 end
 
 
