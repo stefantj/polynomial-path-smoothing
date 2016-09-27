@@ -623,12 +623,12 @@ function form_Abig(points, times, init_der, fin_der, cont_order)
             c_ind += nF;
         end 
 
-        println("Segment $seg:");
-        println("Orders\t Times \t Values");
-        Cslice = C_big[c_ind_init:c_ind-1, 1:size(bval_fixed,1)]*bval_fixed;
-        for s = 1:size(orders_fixed,1)
-            println(orders_fixed[s], "\t", times_fixed[s], "\t",Cslice[s]); 
-        end
+#        println("Segment $seg:");
+#        println("Orders\t Times \t Values");
+#        Cslice = C_big[c_ind_init:c_ind-1, 1:size(bval_fixed,1)]*bval_fixed;
+#        for s = 1:size(orders_fixed,1)
+#            println(orders_fixed[s], "\t", times_fixed[s], "\t",Cslice[s]); 
+#        end
 
 
         A_seg = zeros(curr_degree,curr_degree);
