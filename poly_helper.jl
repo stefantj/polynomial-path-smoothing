@@ -525,7 +525,6 @@ end
 
 
 function form_Abig(points, times, init_der, fin_der, cont_order)
-
     # Points and segments:
     num_pts = size(points,1);
     num_segs = num_pts-1;
@@ -546,6 +545,18 @@ function form_Abig(points, times, init_der, fin_der, cont_order)
     A_big = zeros(tot_degree,tot_degree);
     a_ind = 1;
 
+
+    num_fixed = size(init_der,1)+size(fin_der,1)+num_pts;
+    num_free  = tot_free_degree;
+
+    indep_degree = num_fixed + (cont_order-1)*(num_segs-1)
+
+
+    c_ind_free = 1+num_fixed;
+    c_ind_fixed = 1;
+    c_ind = 1;
+    C_big = zeros(tot_degree, indep_degree);
+
     for seg=1:num_segs
         curr_degree = round(Int64,seg_degrees[seg]);
         # arrange orders, degree into container to compute A_seg:
@@ -553,33 +564,77 @@ function form_Abig(points, times, init_der, fin_der, cont_order)
         orders_free = [];
         times_fixed = [];
         times_free  = [];
+        c_ind_init = c_ind;
         if(seg == 1)
+            # Fixed derivatives:
             orders_fixed = [collect(0:size(init_der,1)); 0];
-            orders_free  = collect(1:cont_order-1); 
+            nF = size(orders_fixed,1);
+            C_big[c_ind:(c_ind+nF-1), c_ind_fixed:c_ind_fixed+nF-1] = eye(nF); # Fixed derivatives don't need to move
+            c_ind_fixed += nF-1; # -1 b/c last point is redundant
+            c_ind += nF;
             #         initial point, derivatives, end point
-            bval_fixed  = [points[1]; init_der];
-            # 
-            times_fixed = [times[1]*ones(size(init_der,1)+1); times[2]];
-            times_free  = times[2]*ones(cont_order-1);
+            bval_fixed  = [points[1]; init_der; points[2]];
+#            times_fixed = [times[1]*ones(size(init_der,1)+1); times[2]];
+            times_fixed = [zeros(size(init_der,1)+1); times[2]-times[1]];
+            
+            # Free Derivatives
+            orders_free  = collect(1:cont_order-1); 
+            nF = size(orders_free,1);
+            C_big[(c_ind):(c_ind+nF-1), c_ind_free:c_ind_free+nF-1] = eye(nF); # Free derivatives given offset
+            c_ind_free += nF - (cont_order-1)
+            c_ind += nF
+#            times_free  = times[2]*ones(cont_order-1);
+            times_free = (times[2]-times[1])*ones(cont_order-1);
+
         elseif(seg == num_segs)
             orders_fixed = [0;collect(0:size(fin_der,1))];
-            orders_free =  collect(1:cont_order-1);
+            nF = size(orders_fixed,1);
+            C_big[c_ind:(c_ind+nF-1), c_ind_fixed:c_ind_fixed+nF-1] = eye(nF); # Fixed derivatives don't need to move
+            c_ind_fixed += nF;
+            c_ind += nF;
             bval_fixed = [bval_fixed; points[end]; fin_der];
+#            times_fixed = [times[end-1]; times[end]*ones(size(fin_der,1)+1)];
+            times_fixed = [ 0; (times[end]-times[end-1])*ones(size(fin_der,1)+1)];
 
-            times_fixed = [times[end-1]; times[end]*ones(size(fin_der,1)+1)];
-            times_free  = times[end-1]*ones(cont_order-1);
+            orders_free =  collect(1:cont_order-1);
+            nF = size(orders_free,1);
+            C_big[(c_ind):(c_ind+nF-1), c_ind_free:c_ind_free+nF-1] = eye(nF); # Free derivatives given offset
+            c_ind_free += nF - (cont_order-1)
+            c_ind += nF
+#            times_free  = times[end-1]*ones(cont_order-1);
+            times_free = zeros(cont_order-1);
         else
+            # Fixed derivatives
             orders_fixed = [0;0];
+            bval_fixed  = [bval_fixed; points[seg+1]];
+#            times_fixed = [times[seg-1]; times[seg]];
+            times_fixed = [0; times[seg+1]-times[seg]];
+            C_big[c_ind,c_ind_fixed] = 1; # Constraint on this segment start
+            C_big[c_ind+1,c_ind_fixed+1] = 1; # Constraint on this segment end
+            c_ind+=2; c_ind_fixed+=1;
+
+            # Free derivatives:
             orders_free  = [collect(1:cont_order-1); collect(1:cont_order-1)];
-            bval_fixed  = [bval_fixed; points[seg]];
-            times_fixed = [times[seg-1]; times[seg]];
-            times_free  = [times[seg-1]*ones(cont_order-1); times[seg]*ones(cont_order-1)];
+#            times_free  = [times[seg-1]*ones(cont_order-1); times[seg]*ones(cont_order-1)];
+            times_free = [zeros(cont_order-1); (times[seg+1]-times[seg])*ones(cont_order-1)];
+            nF = size(orders_free,1);
+            C_big[(c_ind):(c_ind+nF-1), c_ind_free:c_ind_free+nF-1] = eye(nF); # Free derivatives given offset
+            c_ind_free += nF - (cont_order-1)
+            c_ind += nF;
         end 
 
-        num_constr = size(orders_fixed,1)+size(orders_free,1);
+        println("Segment $seg:");
+        println("Orders\t Times \t Values");
+        Cslice = C_big[c_ind_init:c_ind-1, 1:size(bval_fixed,1)]*bval_fixed;
+        for s = 1:size(orders_fixed,1)
+            println(orders_fixed[s], "\t", times_fixed[s], "\t",Cslice[s]); 
+        end
+
+
         A_seg = zeros(curr_degree,curr_degree);
         ords = [orders_fixed;orders_free];
         ts = [times_fixed;times_free];
+        num_constr = size(ords,1);
 
         for k=1:num_constr
             A_seg[k,:] = constr_order(ords[k], ts[k],curr_degree);
@@ -592,7 +647,7 @@ function form_Abig(points, times, init_der, fin_der, cont_order)
 
     # Should also return C and B vectors
 
-    return A_big;
+    return A_big,C_big,bval_fixed;
 end
 
 function form_Qbig(times, init_derivatives, final_derivatives, cont_order)
@@ -622,7 +677,7 @@ function form_Qbig(times, init_derivatives, final_derivatives, cont_order)
     q_ind = 1;
     for seg=1:num_segs
         curr_degree = round(Int64, seg_degrees[seg]);
-        q_coeffs = zeros(curr_degree); q_coeffs[4] = 1; q_coeffs[2] = 0.5;
+        q_coeffs = zeros(curr_degree); q_coeffs[4] = 1; q_coeffs[2] = 0.5; q_coeffs[3] = 0.5
         t = times[seg];
         if(seg!=1)
             t-=times[seg-1];
@@ -633,5 +688,4 @@ function form_Qbig(times, init_derivatives, final_derivatives, cont_order)
     end
     return Q;    
 end
-
 
