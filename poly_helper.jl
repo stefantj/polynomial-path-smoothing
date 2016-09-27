@@ -27,11 +27,11 @@ end
 # Forms a vanilla problem
 function random_poly_prob(num_points::Int64)
     # Random points
-#    xpts = num_points*rand(num_points);#(0:num_points-1);
-#    ypts = num_points*rand(num_points);
+    xpts = num_points*rand(num_points);#(0:num_points-1);
+    ypts = num_points*rand(num_points);
 
-    xpts = collect(1:num_points);
-    ypts = sin((1:num_points)/5)
+#    xpts = collect(1:num_points);
+#    ypts = num_points*sin(pi*(1:num_points)/5)
 
     # Initial derivative constraints: 
     #          vel acc jerk
@@ -54,9 +54,12 @@ function random_poly_prob(num_points::Int64)
     #### Define our cost metrics ####
     # Q coeffs: weight which derivatives you care about:
     q_coeff = zeros(degree);
-    q_coeff[4] = 1;
+    q_coeff[1] = 1.0;
+    q_coeff[2] = 0.5;
+    q_coeff[3] = 0.1;
+    q_coeff[4] = 1.0;
     # Total time penalty
-    kT = 5000; 
+    kT = 50000; 
     
     return PolyProblem(B_x,B_y,round(Int64,B_orders),round(Int64,B_time_inds),q_coeff,kT)
 end
@@ -124,6 +127,7 @@ function form_2segs(prob::PolyProblem,times)
                 end
             end
         end 
+        println("Condition number for segment $seg: ", cond(Cseg));
         C_mats[1:totdeg_here,:,seg] = Cseg;
     end
 
@@ -380,8 +384,6 @@ function solve_polyseg_problem(prob::Poly2Segs)
             A[constr,:] += coeff*(time^pwr).*C_mat[n+1,:]
         end
     end
-
-
      
     # Now solve for coefficients:
     x_reduced = A\prob.poly_prob.B_x;
@@ -402,16 +404,13 @@ function gradient_descent(prob::Poly2Segs,step_size)
     costs_after = zeros(prob.num_segs) # vector of perturbed costs
     J=0;
     for seg=1:num_points-1
-        Q_end = form_Q(prob.poly_prob.q_coeff, prob.times[seg+1]); # Cost up to end point
-        Q_start = form_Q(prob.poly_prob.q_coeff, prob.times[seg]); # Cost up to start point
-
-
+        Q_end = form_Q(prob.poly_prob.q_coeff, prob.times[seg+1]-prob.times[seg]); # Cost up to end point
         
         # Cost before perturbing: 
-        costs_init[seg] = ((prob.x_coeffs'*Q_end*prob.x_coeffs + prob.y_coeffs'*Q_end*prob.y_coeffs))[1]
-        costs_init[seg] -= ((prob.x_coeffs'*Q_start*prob.x_coeffs +prob.y_coeffs'*Q_start*prob.y_coeffs))[1]
-        J += costs_init[seg];
+        costs_init[seg] = ((prob.x_coeffs[:,seg]'*Q_end*prob.x_coeffs[:,seg] + prob.y_coeffs[:,seg]'*Q_end*prob.y_coeffs[:,seg]))[1]
+        J += costs_init[seg]
     end
+    J+= prob.poly_prob.kT*prob.times[end]
 
 
     # Compute initial ratios:
@@ -425,8 +424,10 @@ function gradient_descent(prob::Poly2Segs,step_size)
 
 
     # Compute gradient for each segment:
+    if(false)
     for seg= 1:prob.num_segs
-        for dir=-1:-1 # Optional to consider both increase an decrease. Default is to check decrease but otherwise increase.
+        err = 0;
+        for dir=-1:2:-1 # Optional to consider both increase an decrease. Default is to check decrease but otherwise increase.
 
             # Form new time vector based on perturbation
             t_new = zeros(prob.num_segs+1);
@@ -451,30 +452,36 @@ function gradient_descent(prob::Poly2Segs,step_size)
             # Compute gradient component:
             pnew = form_2segs(prob.poly_prob,t_new)
             solve_polyseg_problem(pnew)
-            Q_end = form_Q(prob.poly_prob.q_coeff, t_new[seg+1])
-            Q_start = form_Q(prob.poly_prob.q_coeff, t_new[seg])
-
+            Q_end = form_Q(prob.poly_prob.q_coeff, t_new[seg+1]-t_new[seg])
             # Cost after perturbing: 
-            costs_after[seg] = ((pnew.x_coeffs'*Q_end*pnew.x_coeffs + pnew.y_coeffs'*Q_end*pnew.y_coeffs))[1]
-            costs_after[seg] -= ((pnew.x_coeffs'*Q_start*pnew.x_coeffs +pnew.y_coeffs'*Q_start*pnew.y_coeffs))[1]
+            costs_after[seg] = ((pnew.x_coeffs[:,seg]'*Q_end*pnew.x_coeffs[:,seg] + pnew.y_coeffs[:,seg]'*Q_end*pnew.y_coeffs[:,seg]))[1]
+
+            # Compute cost for kT:
+            costs_after[seg] += prob.poly_prob.kT*( (t_new[seg+1]-t_new[seg]))
             
             # Gradient is increase in cost for having moved.
             # This is dumb, but: 
-            if(costs_after[seg]-costs_init[seg] > 0) # Moving this way hurts, suggest going the other way:
-                grad[seg] += sign(dir)*(-1);
-            else
-                grad[seg] += sign(dir)
-            end
+            grad[seg] = (costs_after[seg]-costs_init[seg])/(max(costs_after[seg],costs_init[seg]))
+            grad[seg] = sign(grad[seg])*pert_size;
+#            if(costs_after[seg]-costs_init[seg] > 0) # Moving this way hurts, suggest going the other way:
+#                grad[seg] += sign(dir)*(-1);
+#            else
+#                grad[seg] += sign(dir)
+#            end
         end
         # This is dumb - fix later. Should depend on the error values. 
         # IF grad is positive, this means that both measurements agree that moving in the positive direction 
         if(grad[seg] == 0) # Means suggestion is to move positive
 #            pert_ratios[pt] = (1-step_size)*t_ratio[pt] + (step_size)*(t_ratio[pt]*(1-pert_size)) # Go the other way
+            println("Zero error!")
         else
-            pert_ratios[seg] = (1-step_size)*t_ratio[seg] + step_size*(t_ratio[seg]*(1+grad[seg]*pert_size)) # move in suggested direction
+            pert_ratios[seg] = (1-step_size)*t_ratio[seg] + step_size*(t_ratio[seg]*(1-grad[seg])) # move in suggested direction
         end
     end
+    end
 
+    println("1-G:\n",1-grad)
+    println(pert_ratios)
     # Now compute gradient with respect to total time:
     t_scale = 1.0;
     t_new = zeros(prob.num_segs+1);
@@ -487,14 +494,17 @@ function gradient_descent(prob::Poly2Segs,step_size)
     solve_polyseg_problem(pnew)
     new_cost = 0;
     for seg=1:prob.num_segs
-        Q_end = form_Q(prob.poly_prob.q_coeff, t_new[seg+1])
-        Q_start = form_Q(prob.poly_prob.q_coeff, t_new[seg])
-
+        Q_end = form_Q(prob.poly_prob.q_coeff, t_new[seg+1]-t_new[seg])
         # Cost after perturbing: 
-        new_cost += ((pnew.x_coeffs'*Q_end*pnew.x_coeffs + pnew.y_coeffs'*Q_end*pnew.y_coeffs))[1]
-        new_cost -= ((pnew.x_coeffs'*Q_start*pnew.x_coeffs +pnew.y_coeffs'*Q_start*pnew.y_coeffs))[1]
+        new_cost += ((pnew.x_coeffs[:,seg]'*Q_end*pnew.x_coeffs[:,seg] + pnew.y_coeffs[:,seg]'*Q_end*pnew.y_coeffs[:,seg]))[1]
     end
+    new_cost += prob.poly_prob.kT*t_new[end];
+
+    err = step_size*(new_cost-J)/max(new_cost,J)
     
+    t_scale= 1-err;
+    println("NC: $new_cost, J: $J");
+    println("Tscale = $t_scale")
 
     if(J > new_cost) # increase helped
         t_scale = 1+pert_size;
@@ -509,5 +519,119 @@ function gradient_descent(prob::Poly2Segs,step_size)
         dt = t_scale * prob.times[end]*pert_ratios[seg]
         tvec_new[seg+1] = dt + tvec_new[seg];
     end
+    println("Tvec: $tvec_new");
     return tvec_new, J
 end
+
+
+function form_Abig(points, times, init_der, fin_der, cont_order)
+
+    # Points and segments:
+    num_pts = size(points,1);
+    num_segs = num_pts-1;
+
+    # Degrees:
+    init_degree = size(init_der,1)+1+cont_order;
+    fin_degree  = size(fin_der,1)+1+cont_order;
+    other_degree = cont_order*2;
+    seg_degrees = [init_degree; other_degree*ones(num_segs-2); fin_degree];
+    seg_free_degrees = [size(init_der,1); ones(num_segs-2); size(fin_der,1)];
+
+    tot_degree = init_degree+fin_degree+(num_segs-2)*other_degree;
+    tot_free_degree = sum(seg_free_degrees);
+
+    bval_fixed = [];
+
+    # Form A matrix:
+    A_big = zeros(tot_degree,tot_degree);
+    a_ind = 1;
+
+    for seg=1:num_segs
+        curr_degree = round(Int64,seg_degrees[seg]);
+        # arrange orders, degree into container to compute A_seg:
+        orders_fixed = [];
+        orders_free = [];
+        times_fixed = [];
+        times_free  = [];
+        if(seg == 1)
+            orders_fixed = [collect(0:size(init_der,1)); 0];
+            orders_free  = collect(1:cont_order-1); 
+            #         initial point, derivatives, end point
+            bval_fixed  = [points[1]; init_der];
+            # 
+            times_fixed = [times[1]*ones(size(init_der,1)+1); times[2]];
+            times_free  = times[2]*ones(cont_order-1);
+        elseif(seg == num_segs)
+            orders_fixed = [0;collect(0:size(fin_der,1))];
+            orders_free =  collect(1:cont_order-1);
+            bval_fixed = [bval_fixed; points[end]; fin_der];
+
+            times_fixed = [times[end-1]; times[end]*ones(size(fin_der,1)+1)];
+            times_free  = times[end-1]*ones(cont_order-1);
+        else
+            orders_fixed = [0;0];
+            orders_free  = [collect(1:cont_order-1); collect(1:cont_order-1)];
+            bval_fixed  = [bval_fixed; points[seg]];
+            times_fixed = [times[seg-1]; times[seg]];
+            times_free  = [times[seg-1]*ones(cont_order-1); times[seg]*ones(cont_order-1)];
+        end 
+
+        num_constr = size(orders_fixed,1)+size(orders_free,1);
+        A_seg = zeros(curr_degree,curr_degree);
+        ords = [orders_fixed;orders_free];
+        ts = [times_fixed;times_free];
+
+        for k=1:num_constr
+            A_seg[k,:] = constr_order(ords[k], ts[k],curr_degree);
+        end
+
+        A_big[a_ind:a_ind+curr_degree-1, a_ind:a_ind+curr_degree-1] = A_seg;
+        a_ind += curr_degree;        
+    end
+
+
+    # Should also return C and B vectors
+
+    return A_big;
+end
+
+function form_Qbig(times, init_derivatives, final_derivatives, cont_order)
+    if(size(init_derivatives,1) != cont_order-1)
+        println("Warning - initial derivatives not the same length as continuity order")
+    end
+    if(size(final_derivatives,1) != cont_order-1)
+        println("Warning - final derivatives not the same length as continuity order")
+    end
+
+    # Points and segments:
+    num_pts = size(times,1);
+    num_segs = num_pts-1;
+
+    # Degrees:
+    init_degree = size(init_derivatives,1)+cont_order+1;
+    fin_degree  = size(final_derivatives,1)+cont_order+1;
+    other_degree = cont_order*2;
+    seg_degrees = [init_degree; other_degree*ones(num_segs-2); fin_degree];
+    seg_free_degrees = [size(init_derivatives,1); ones(num_segs-2); size(final_derivatives,1)];
+
+    tot_degree = init_degree+fin_degree+(num_segs-2)*other_degree;
+    tot_free_degree = sum(seg_free_degrees);
+
+    # Q matrix:
+    Q = zeros(tot_degree,tot_degree);
+    q_ind = 1;
+    for seg=1:num_segs
+        curr_degree = round(Int64, seg_degrees[seg]);
+        q_coeffs = zeros(curr_degree); q_coeffs[4] = 1; q_coeffs[2] = 0.5;
+        t = times[seg];
+        if(seg!=1)
+            t-=times[seg-1];
+        end
+        Q_i = form_Q(q_coeffs, t);
+        Q[q_ind:q_ind+curr_degree-1, q_ind:q_ind+curr_degree-1] = Q_i;
+        q_ind += curr_degree
+    end
+    return Q;    
+end
+
+
