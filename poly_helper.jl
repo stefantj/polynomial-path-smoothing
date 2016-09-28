@@ -39,15 +39,15 @@ function random_poly_prob(num_points::Int64, cont_order)
 
     # Initial derivative constraints: 
     #          vel acc jerk
-    bx_init = [1.0; zeros(cont_order-1)];
-    by_init = [0.0; zeros(cont_order-1)];
-    bz_init = zeros(cont_order);
-    bp_init = zeros(cont_order);
+    bx_init = [1.0; zeros(cont_order-2)];
+    by_init = [0.0; zeros(cont_order-2)];
+    bz_init = zeros(cont_order-1);
+    bp_init = zeros(cont_order-1);
     # Final derivative constraints:
-    bx_final = [1.0; zeros(cont_order-1)];
-    by_final = [0.0; zeros(cont_order-1)];
-    bz_final = zeros(cont_order);
-    bp_final = zeros(cont_order);
+    bx_final = [1.0; zeros(cont_order-2)];
+    by_final = [0.0; zeros(cont_order-2)];
+    bz_final = zeros(cont_order-1);
+    bp_final = zeros(cont_order-1);
 
     #### Assemble constraint variables: #### 
     # Total B vectors:
@@ -56,7 +56,8 @@ function random_poly_prob(num_points::Int64, cont_order)
     B_z = [zpts[1]; bz_init; zpts[2:end]; bz_final];
     B_p = [ppts[1]; bp_init; ppts[2:end]; bp_final];
     # Order of constraints, in order of B_x
-    B_orders = [collect(0:cont_order-1); zeros(num_points-1); collect(1:cont_order-1)];
+    #           Initial derivatives       middle points       final derivatives
+    B_orders = [collect(0:cont_order-1); zeros(num_points-2); collect(0:cont_order-1)];
     # Time indices of constraints:
     B_time_inds = [ones(cont_order); collect(2:num_points); num_points*ones(cont_order-1)];
 
@@ -368,7 +369,7 @@ init_time = toq();
             C_big[c_ind:(c_ind+nF-1), c_ind_fixed:c_ind_fixed+nF-1] = eye(nF); # Fixed derivatives don't need to move
             c_ind_fixed += nF;
             c_ind += nF;
-            times_fixed = [ 0; (times[end]-times[end-1])*ones(num_fin_constr)];
+            times_fixed = [ 0; (times[seg+1]-times[seg])*ones(num_fin_constr)];
 
             orders_free =  collect(1:cont_order-1);
             nF = size(orders_free,1);
@@ -416,6 +417,8 @@ init_time = toq();
         a_ind += curr_degree;        
         addA_time+=toq();
     end
+
+    println("num fixed: ", c_ind_fixed-1, " num expected: ", num_fixed);
 
     tot_time = init_time+prep_time+addA_time;
 #    println("A_init: ", init_time/tot_time, "\nA_prep: ", prep_time/tot_time, "\nA_add: ", addA_time/tot_time);
