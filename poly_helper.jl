@@ -604,7 +604,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_init_constr = size(find(prob.B_time_inds.==1),1);
     num_fin_constr  = size(find(prob.B_time_inds.==num_points),1);
 
-    times = float(collect(0:num_points-1));
+    times = float(collect(0:num_points-1))*10;
 
 ## Here is where the gradient loop will start:
     # Form A matrix:
@@ -743,7 +743,7 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rp
         u2rpm_1 -u2rpm_2 -u2rpm_3 u2rpm_4
         u2rpm_1 u2rpm_2 -u2rpm_3 -u2rpm_4
         u2rpm_1 -u2rpm_2 u2rpm_3 -u2rpm_4];
-    mass = 800;
+    mass = 0.800; # in kilograms
 
     #####################
     #create variables to hold values initialize containers with zeros
@@ -845,6 +845,7 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rp
     rpms = u2rpms*u_vec
     println(size(rpms,1))
     println(size(rpms,2))
+    figure()
     plot((1:num_poly*time_res),rpms[1,:])
     #check that rpms are not above a certain threshold
     if(any(rpms.>max_motor_rpm))
