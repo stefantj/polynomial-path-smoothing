@@ -87,12 +87,97 @@ function print_poly_prob(p::PolyProblem)
     println("********************************");
 end
 
-function plot_poly(sol::PolySol, fn)
+function plot_poly_dim(sol::PolySol, fn, dim)
     # Evaluate polynomial at derivatives:
     colorwheel = [:red,:blue];
     num_colors = 2;
     num_tsteps = 100;
 
+    # points:
+    p_inds = find(sol.poly_prob.B_orders.==0)
+
+    xpts = sol.poly_prob.B_x[p_inds];
+    if(dim=="x" || dim=="X")
+        xpts = sol.poly_prob.B_x[p_inds];
+    elseif(dim=="y" || dim=="Y")
+        xpts = sol.poly_prob.B_y[p_inds];
+    elseif(dim=="z" || dim=="Z")
+        xpts = sol.poly_prob.B_z[p_inds];
+    elseif(dim=="p" || dim=="P")
+        xpts = sol.poly_prob.B_p[p_inds];
+    else
+        println("Error: dim must be \"x\", \"y\", \"z\", or \"p\"");
+        return;
+    end
+
+    # plot polynomial:
+    figure(fn);clf();
+    offset=0;
+    seg_ind = 1;
+    for seg=1:sol.num_segs
+        seg_deg = 0;
+        if(seg==1)
+            seg_deg = sol.params.cont_order + size(find(sol.poly_prob.B_time_inds.==1),1)
+        elseif(seg==sol.num_segs)
+            seg_deg = sol.params.cont_order + size(find(sol.poly_prob.B_time_inds.==sol.num_segs+1),1);
+        else
+            seg_deg = 2*sol.params.cont_order;
+        end
+        xc = [];
+        if(dim=="x" || dim=="X")
+            xc = sol.x_coeffs[seg_ind:seg_ind+seg_deg-1];
+        elseif(dim=="y" || dim == "Y")
+            xc = sol.y_coeffs[seg_ind:seg_ind+seg_deg-1];
+        elseif(dim=="z" || dim=="Z")
+            xc = sol.z_coeffs[seg_ind:seg_ind+seg_deg-1];
+        elseif(dim=="p" || dim == "P")
+            xc = sol.p_coeffs[seg_ind:seg_ind+seg_deg-1];
+        else
+            println("Error: dim must be \"x\", \"y\", \"z\", or \"p\"");
+            return;
+        end
+            
+        seg_ind+=seg_deg;
+        
+        t = linspace(0,sol.times[seg+1]-sol.times[seg],num_tsteps );
+        xvals = zeros(num_tsteps);
+        xvels = zeros(num_tsteps);
+        xaccs = zeros(num_tsteps);
+        xjerk = zeros(num_tsteps);
+
+        for deg=1:seg_deg
+            xvals += xc[deg]*t.^(deg-1);
+        end
+
+        for deg=2:seg_deg
+            xvels += (deg-1)*xc[deg]*t.^(deg-2);
+        end
+
+        for deg=3:seg_deg
+            xaccs += (deg-1)*(deg-2)*xc[deg]*t.^(deg-3);
+        end
+
+        for deg=4:seg_deg
+            xjerk += (deg-1)*(deg-2)*(deg-3)*xc[deg]*t.^(deg-4);
+        end
+        figure(fn);
+        subplot(2,2,1); title("$dim position");xlabel("time"); ylabel("value");
+        scatter(sol.times, xpts); plot(sol.times, xpts, linestyle=":", color=:gray);
+        plot(t+sol.times[seg],xvals,color=colorwheel[mod(seg,num_colors)+1]);
+        subplot(2,2,2); title("$dim Velocity"); ylabel("$dim Velocity"); xlabel("time");
+        plot(t+sol.times[seg], xvels, color=:red);
+        subplot(2,2,3); title("$dim Acceleration"); ylabel("$dim Acceleration"); xlabel("time");
+        plot(t+sol.times[seg], xaccs, color=:red);
+        subplot(2,2,4); title("$dim Jerk"); ylabel("$dim Jerk"); xlabel("time");
+        plot(t+sol.times[seg], xjerk, color=:red);
+    end
+end
+
+function plot_poly(sol::PolySol, fn)
+    # Evaluate polynomial at derivatives:
+    colorwheel = [:red,:blue];
+    num_colors = 2;
+    num_tsteps = 100;
 
     # points:
     p_inds = find(sol.poly_prob.B_orders.==0)
@@ -145,7 +230,7 @@ function plot_poly(sol::PolySol, fn)
             xjerk += (deg-1)*(deg-2)*(deg-3)*xc[deg]*t.^(deg-4);
             yjerk += (deg-1)*(deg-2)*(deg-3)*yc[deg]*t.^(deg-4);
         end
-        figure(1);
+        figure(fn);
         subplot(2,2,1); title("position");xlabel("X value"); ylabel("Y value");
         scatter(xpts,ypts); plot(xpts,ypts,color=:gray,linestyle=":");
         plot(xvals,yvals,color=colorwheel[mod(seg,num_colors)+1]);
@@ -325,7 +410,7 @@ init_time = toq();
     # [A B
     #  C 0]
     # A is upper triangular, B is full, C is diagonal and 'D' is 0 
-    # some massaging is needed to make this work, but this is pretty easy to do.
+    # some massaging is needed to make this work, but this is pretty easy to do. <- handle via case-by-case
     # Then we can compute the inverse of the very small 5x5, which will speed things up a lot.
         A_big_inv[a_ind:a_ind+curr_degree-1, a_ind:a_ind+curr_degree-1] = inv(A_seg);
         a_ind += curr_degree;        
@@ -529,7 +614,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_unique = size(C,2);
     t_Abig = toq();
 
-#    figure(5); spy(A);
+    figure(5); spy(A);
 
     tic();
 #    Ainv = inv(A);
@@ -608,4 +693,6 @@ function test_multiseg(num_points)
     params = PolyParams(cont_order);
     sol = poly_smoothing(prob, params)
     plot_poly(sol,1);
+    plot_poly_dim(sol,2,"x");
+    plot_poly_dim(sol,3,"y");
 end
