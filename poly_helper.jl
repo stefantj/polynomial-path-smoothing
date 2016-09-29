@@ -69,7 +69,7 @@ function random_poly_prob(num_points::Int64, cont_order)
     q_coeff[3] = 0.1;
     q_coeff[4] = 1.0;
     # Total time penalty
-    kT = 50000; 
+    kT = 500; 
 
     return PolyProblem(B_x,B_y,B_z,B_p,round(Int64,B_orders),round(Int64,B_time_inds),q_coeff,kT)
 end
@@ -494,8 +494,6 @@ function gradient_descent(sol::PolySol,step_size)
     err = step_size*(new_cost-J)/max(new_cost,J)
     
     t_scale= 1-err;
-    println("NC: $new_cost, J: $J");
-    println("Tscale = $t_scale")
 
     if(J[1] > new_cost[1]) # increase helped
         t_scale = 1+pert_size;
@@ -510,7 +508,6 @@ function gradient_descent(sol::PolySol,step_size)
         dt = t_scale *(sol.times[seg+1]-sol.times[seg])
         tvec_new[seg+1] = dt + tvec_new[seg];
     end
-    println("Tvec: $tvec_new");
     return tvec_new, J
 end
 
@@ -532,7 +529,6 @@ function poly_smoothing_with_times(prob::PolyProblem, param::PolyParams,times::V
     num_unique = size(C,2);
     t_Abig = toq();
 
-    figure(5); spy(A);
 
     tic();
     AiC = Ainv*C; # This is about 10% time, and can be fixed by just selecting rows/columns
@@ -583,7 +579,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_init_constr = size(find(prob.B_time_inds.==1),1);
     num_fin_constr  = size(find(prob.B_time_inds.==num_points),1);
 
-    times = float(collect(0:num_points-1))*10;
+    times = float(collect(0:num_points-1));
     num_grad_steps = 10;
     step_size = 0.8;
     best_cost = Inf;
@@ -601,7 +597,6 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
         num_unique = size(C,2);
         t_Abig = toq();
 
-        figure(5); spy(A);
 
         tic();
     #    Ainv = inv(A);
