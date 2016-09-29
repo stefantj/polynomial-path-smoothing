@@ -39,15 +39,15 @@ function random_poly_prob(num_points::Int64, cont_order)
 
     # Initial derivative constraints: 
     #          vel acc jerk
-    bx_init = [1.0; zeros(cont_order-1)];
-    by_init = [0.0; zeros(cont_order-1)];
-    bz_init = zeros(cont_order);
-    bp_init = zeros(cont_order);
+    bx_init = [0.0; zeros(cont_order-2)];
+    by_init = [0.0; zeros(cont_order-2)];
+    bz_init = zeros(cont_order-1);
+    bp_init = zeros(cont_order-1);
     # Final derivative constraints:
-    bx_final = [1.0; zeros(cont_order-1)];
-    by_final = [0.0; zeros(cont_order-1)];
-    bz_final = zeros(cont_order);
-    bp_final = zeros(cont_order);
+    bx_final = [0.0; zeros(cont_order-2)];
+    by_final = [0.0; zeros(cont_order-2)];
+    bz_final = zeros(cont_order-1);
+    bp_final = zeros(cont_order-1);
 
     #### Assemble constraint variables: #### 
     # Total B vectors:
@@ -241,6 +241,161 @@ function plot_poly(sol::PolySol, fn)
         subplot(2,2,3); title("Acceleration"); ylabel("Acceleration"); xlabel("time");
         plot(t+sol.times[seg], xaccs, color=:red);
         plot(t+sol.times[seg], yaccs, color=:blue);
+        legend(["X","Y"]);
+        subplot(2,2,4); title("Jerk"); ylabel("Jerk"); xlabel("time");
+        plot(t+sol.times[seg], xjerk, color=:red);
+        plot(t+sol.times[seg], yjerk, color=:blue);
+        legend(["X","Y"]);
+    end
+end
+
+function check_poly(sol::PolySol, vmax,amax)
+    num_tsteps = 20;
+    offset=0;
+    seg_ind = 1;
+    violations = [];
+    viosize = zeros(sol.num_segs);
+    maxvio = 0;
+    for seg=1:sol.num_segs
+        seg_deg = 0;
+        if(seg==1)
+            seg_deg = sol.params.cont_order + size(find(sol.poly_prob.B_time_inds.==1),1)
+        elseif(seg==sol.num_segs)
+            seg_deg = sol.params.cont_order + size(find(sol.poly_prob.B_time_inds.==sol.num_segs+1),1);
+        else
+            seg_deg = 2*sol.params.cont_order;
+        end
+        xc = sol.x_coeffs[seg_ind:seg_ind+seg_deg-1];
+        yc = sol.y_coeffs[seg_ind:seg_ind+seg_deg-1];
+        zc = sol.z_coeffs[seg_ind:seg_ind+seg_deg-1];
+        seg_ind+=seg_deg;
+        
+        xvals = 0;
+        xvels = 0;
+        xaccs = 0;
+        yvals = 0;
+        yvels = 0;
+        yaccs = 0;
+        zvals = 0;
+        zvels = 0;
+        zaccs = 0;
+
+        t = linspace(0,sol.times[seg+1]-sol.times[seg],num_tsteps );
+        for time in t
+            for deg=1:seg_deg
+                xvals += xc[deg]*time^(deg-1);
+                yvals += yc[deg]*time^(deg-1);
+                zvals += zc[deg]*time^(deg-1);
+            end
+
+            for deg=2:seg_deg
+                xvels += (deg-1)*xc[deg]*time^(deg-2);
+                yvels += (deg-1)*yc[deg]*time^(deg-2);
+                zvels += (deg-1)*zc[deg]*time^(deg-2);
+            end
+            v = norm([xvels,yvels,zvels]);
+            if(v >= vmax)
+                println("segment $seg violated vel constraint: $v > $vmax");
+                if(v-vmax > maxvio)
+                    maxvio = v-vmax
+                end
+                violations = [violations; seg];
+                viosize[seg] = v-vmax
+                break;
+            end 
+
+            for deg=3:seg_deg
+                xaccs += (deg-1)*(deg-2)*xc[deg]*time^(deg-3);
+                yaccs += (deg-1)*(deg-2)*yc[deg]*time^(deg-3);
+                zaccs += (deg-1)*(deg-2)*zc[deg]*time^(deg-3);
+            end
+            a = norm([xaccs;yaccs;zaccs])
+            if(a > amax)
+                println("segment $seg violated acceleration constraint: $a > $amax");
+                violations = [violations;seg];
+                if(a-amax>maxvio)
+                    maxvio=a-amax
+                end
+                viosize[seg]=a-amax;
+                break;
+            end
+        end
+    end
+    return violations,viosize./maxvio, maxvio;
+end
+
+function plot_poly(sol::PolySol, fn)
+    # Evaluate polynomial at derivatives:
+    colorwheel = [:red,:blue];
+    num_colors = 2;
+    num_tsteps = 100;
+
+    # points:
+    p_inds = find(sol.poly_prob.B_orders.==0)
+    xpts = sol.poly_prob.B_x[p_inds];
+    ypts = sol.poly_prob.B_y[p_inds];
+
+    # plot polynomial:
+    figure(fn);clf();
+    offset=0;
+    seg_ind = 1;
+    for seg=1:sol.num_segs
+        seg_deg = 0;
+        if(seg==1)
+            seg_deg = sol.params.cont_order + size(find(sol.poly_prob.B_time_inds.==1),1)
+        elseif(seg==sol.num_segs)
+            seg_deg = sol.params.cont_order + size(find(sol.poly_prob.B_time_inds.==sol.num_segs+1),1);
+        else
+            seg_deg = 2*sol.params.cont_order;
+        end
+        xc = sol.x_coeffs[seg_ind:seg_ind+seg_deg-1];
+        yc = sol.y_coeffs[seg_ind:seg_ind+seg_deg-1];
+        seg_ind+=seg_deg;
+        
+        t = linspace(0,sol.times[seg+1]-sol.times[seg],num_tsteps );
+        xvals = zeros(num_tsteps);
+        yvals = zeros(num_tsteps);
+        xvels = zeros(num_tsteps);
+        yvels = zeros(num_tsteps);
+        xaccs = zeros(num_tsteps);
+        yaccs = zeros(num_tsteps);
+        xjerk = zeros(num_tsteps);
+        yjerk = zeros(num_tsteps);
+
+        for deg=1:seg_deg
+            xvals += xc[deg]*t.^(deg-1);
+            yvals += yc[deg]*t.^(deg-1);
+        end
+
+        for deg=2:seg_deg
+            xvels += (deg-1)*xc[deg]*t.^(deg-2);
+            yvels += (deg-1)*yc[deg]*t.^(deg-2);
+        end
+
+        for deg=3:seg_deg
+            xaccs += (deg-1)*(deg-2)*xc[deg]*t.^(deg-3);
+            yaccs += (deg-1)*(deg-2)*yc[deg]*t.^(deg-3);
+        end
+
+        for deg=4:seg_deg
+            xjerk += (deg-1)*(deg-2)*(deg-3)*xc[deg]*t.^(deg-4);
+            yjerk += (deg-1)*(deg-2)*(deg-3)*yc[deg]*t.^(deg-4);
+        end
+        figure(fn);
+        subplot(2,2,1); title("position");xlabel("X value"); ylabel("Y value");
+        scatter(xpts,ypts); plot(xpts,ypts,color=:gray,linestyle=":");
+        plot(xvals,yvals,color=colorwheel[mod(seg,num_colors)+1]);
+        subplot(2,2,2); title("Velocity"); ylabel("Velocity"); xlabel("time");
+        plot(t+sol.times[seg], xvels, color=:red);
+        plot(t+sol.times[seg], yvels, color=:blue);
+        plot(t+sol.times[seg], 2.0*ones(num_tsteps),linestyle=":");
+        plot(t+sol.times[seg], -2.0*ones(num_tsteps),linestyle=":");
+        legend(["X","Y"]);
+        subplot(2,2,3); title("Acceleration"); ylabel("Acceleration"); xlabel("time");
+        plot(t+sol.times[seg], xaccs, color=:red);
+        plot(t+sol.times[seg], yaccs, color=:blue);
+        plot(t+sol.times[seg], 1.0*ones(num_tsteps),linestyle=":");
+        plot(t+sol.times[seg], -1.0*ones(num_tsteps),linestyle=":");
         legend(["X","Y"]);
         subplot(2,2,4); title("Jerk"); ylabel("Jerk"); xlabel("time");
         plot(t+sol.times[seg], xjerk, color=:red);
@@ -479,36 +634,51 @@ function gradient_descent(sol::PolySol,step_size)
     J = sol.x_coeffs'*Q*sol.x_coeffs + sol.y_coeffs'*Q*sol.y_coeffs + sol.z_coeffs'*Q*sol.z_coeffs + sol.p_coeffs'*Q*sol.p_coeffs + sol.poly_prob.kT*sol.times[end];
 
     # Now compute gradient with respect to total time:
+    pert_size = 0.4
     t_scale = 1.0;
-    pert_size = 0.1
+    seg_scale = ones(sol.num_segs);
+    # Check if we're violating the velocity etc. constraints: 
+    vmax = 2.0;
+    amax = 1.0; 
+    violations,viosize,maxvio = check_poly(sol, vmax,amax);
+    if(!isempty(violations))
+        # expand size of violated constraint:
+        for ind in violations
+            seg_scale[ind] = 1+viosize[ind]*pert_size;
+        end 
+    end
+
+    # Try shrinking time:
     t_new = zeros(sol.num_segs+1);
     t_new[1] = sol.times[1];
     for pt=2:num_points
-        t_new[pt] = (1+pert_size)*sol.times[pt];
+        t_new[pt] = (1-.5*pert_size)*sol.times[pt];
     end
 
     newsol = poly_smoothing_with_times(sol.poly_prob, sol.params, t_new);
     Qnew = form_Qbig(t_new, num_init_constr, num_fin_constr, sol.params.cont_order); 
     new_cost = newsol.x_coeffs'*Qnew*newsol.x_coeffs + newsol.y_coeffs'*Qnew*newsol.y_coeffs + newsol.z_coeffs'*Qnew*newsol.z_coeffs + newsol.p_coeffs'*Qnew*newsol.p_coeffs + sol.poly_prob.kT*t_new[end];
 
-    err = step_size*(new_cost-J)/max(new_cost,J)
-    
-    t_scale= 1-err;
-
-    if(J[1] > new_cost[1]) # increase helped
-        t_scale = 1+pert_size;
+    if(J[1] > new_cost[1]) # decrease helped
+        t_scale = 1-.5*pert_size;
     else  #Increase hurt
-        t_scale = 1-pert_size;
-    end    
+        t_scale = 1+.5*pert_size;
+    end
+    t_scale = 1.0;
+
+    tmax = 300;
+    if(sol.times[end] > tmax)
+        t_scale = 0.5*t_scale;
+    end
     
     ## Now we take the gradient step:
     tvec_new = zeros(sol.num_segs+1);
     tvec_new[1] = sol.times[1];
     for seg=1:sol.num_segs
-        dt = t_scale *(sol.times[seg+1]-sol.times[seg])
+        dt = t_scale *(sol.times[seg+1]-sol.times[seg])*seg_scale[seg]
         tvec_new[seg+1] = dt + tvec_new[seg];
     end
-    return tvec_new, J
+    return tvec_new, J,size(violations,1),maxvio
 end
 
 # Smooths the given polynomial problem. 
@@ -579,14 +749,35 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_init_constr = size(find(prob.B_time_inds.==1),1);
     num_fin_constr  = size(find(prob.B_time_inds.==num_points),1);
 
-    times = float(collect(0:num_points-1));
-    num_grad_steps = 10;
+#    times = float(collect(0:num_points-1));
+
+    vmax = 2.0;
+    amax = 1.0; 
+
+    # assign time proportional to the distance 
+    times = zeros(num_points);
+    pinds = find(prob.B_orders.==0);
+    point_index = 0;
+    lastpt = []
+    for p in pinds
+        point_index += 1
+        currpt = [prob.B_x[p],prob.B_y[p],prob.B_z[p]];
+        if(point_index > 1);
+            dt = norm(currpt-lastpt)/(0.6*vmax/sqrt(3));
+            times[point_index] = times[point_index-1]+dt;
+        end
+        lastpt = currpt
+    end
+
+    num_grad_steps = 20;
     step_size = 0.8;
     best_cost = Inf;
     best_sol = [];
+    minvios = Inf;
 
     times_trace = zeros(num_grad_steps);
     cost_trace = zeros(num_grad_steps);
+    vios_trace = zeros(num_grad_steps);
 
 ## Here is where the gradient loop will start:
     for step=1:num_grad_steps
@@ -633,20 +824,27 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     #    println("opt:  ", t_opt, "\t", t_opt/t_tot); 
         sol = PolySol(prob, param, num_points-1, times, x_coeffs, y_coeffs, z_coeffs, p_coeffs); 
 
-        times, J = gradient_descent(sol, step_size);
+        times, J,num_vios,magvios = gradient_descent(sol, step_size);
         times_trace[step] = times[end];
         cost_trace[step] = J[1];
+        vios_trace[step] = magvios;
 
-        if(J[1] < best_cost)
+        if( J[1] < best_cost && magvios < minvios)
             best_cost = J[1];
             best_sol = sol;
+            minvios = magvios
         end
+    end
+
+    if(minvios > 0.1)
+        println("No feasible path found, using the minimum violation path");
     end
 
 
     figure(7); clf(); 
-    subplot(2,1,1); plot(1:num_grad_steps, cost_trace); xlabel("Iteration"); ylabel("Cost");
-    subplot(2,1,2); plot(1:num_grad_steps, times_trace); xlabel("Iteration"); ylabel("Path time");
+    subplot(3,1,1); plot(1:num_grad_steps, cost_trace); xlabel("Iteration"); ylabel("Cost");
+    subplot(3,1,2); plot(1:num_grad_steps, times_trace); xlabel("Iteration"); ylabel("Path time");
+    subplot(3,1,3); plot(1:num_grad_steps, vios_trace); xlabel("Iteration"); ylabel("violations");
     return best_sol
 end
 
