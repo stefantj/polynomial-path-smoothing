@@ -250,7 +250,7 @@ function plot_poly(sol::PolySol, fn)
 end
 
 function check_poly(sol::PolySol, vmax,amax)
-    num_tsteps = 20;
+    num_tsteps = 100;
     offset=0;
     seg_ind = 1;
     violations = [];
@@ -295,13 +295,11 @@ function check_poly(sol::PolySol, vmax,amax)
             end
             v = norm([xvels,yvels,zvels]);
             if(v >= vmax)
-                println("segment $seg violated vel constraint: $v > $vmax");
                 if(v-vmax > maxvio)
                     maxvio = v-vmax
                 end
                 violations = [violations; seg];
-                viosize[seg] = v-vmax
-                break;
+                viosize[seg] += (v-vmax)*(t[2]-t[1]) # amount * dt
             end 
 
             for deg=3:seg_deg
@@ -316,12 +314,12 @@ function check_poly(sol::PolySol, vmax,amax)
                 if(a-amax>maxvio)
                     maxvio=a-amax
                 end
-                viosize[seg]=a-amax;
-                break;
+                viosize[seg]+=(a-amax)*(t[2]-t[1])
             end
         end
     end
-    return violations,viosize./maxvio, maxvio;
+    maxvio = maximum(viosize);
+    return violations,viosize./maxvio, sum(viosize);
 end
 
 function plot_poly(sol::PolySol, fn)
@@ -666,7 +664,7 @@ function gradient_descent(sol::PolySol,step_size)
     end
     t_scale = 1.0;
 
-    tmax = 300;
+    tmax = 100;
     if(sol.times[end] > tmax)
         t_scale = 0.5*t_scale;
     end
@@ -781,6 +779,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
 
 ## Here is where the gradient loop will start:
     for step=1:num_grad_steps
+        println("Time: ", times[end]);
         # Form A matrix:
 
         tic();
@@ -829,7 +828,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
         cost_trace[step] = J[1];
         vios_trace[step] = magvios;
 
-        if( J[1] < best_cost && magvios < minvios)
+        if( magvios < minvios)
             best_cost = J[1];
             best_sol = sol;
             minvios = magvios
@@ -837,6 +836,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     end
 
     if(minvios > 0.1)
+        println("Min violation is $minvios");
         println("No feasible path found, using the minimum violation path");
     end
 
