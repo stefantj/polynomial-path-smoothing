@@ -802,107 +802,75 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rp
     u3_vec = xdd;
     u4_vec = xdd;
     #Create a time vector for reporting purpose
-    timeRep = xdd;
+    timeRep = zeros(Float64,0,1);
     #Needed initializations
     z_B = 0; #variable to hold the up body vector of copter
     #Needed for coefficients and angular acceleration
     yawdd = xdd;
     yaw = xdd;
-
-    #Loop through all segments
-    for looper = 1:(num_poly)
-        #Create time vector
-        t = collect(linspace(time_vec[looper],time_vec[looper+1],time_res));
-        #update coeffs for ever poly
-        #println((red_degree_by+1:degree)+degree*(looper-1))
-        xddcoeffs = xcoeffs[(1:degree)+degree*(looper-1)];
-        println(t)
-        yddcoeffs = ycoeffs[(1:degree)+degree*(looper-1)];
-        zddcoeffs = zcoeffs[(1:degree)+degree*(looper-1)];
-        pddcoeffs = pcoeffs[(1:degree)+degree*(looper-1)];
-        
-        for loop=1:time_res
-            cleaner = (looper-1)*time_res+loop;
-            timeRep[cleaner] = t[loop];
-            print(t[loop]);
-            #Calculate the velocity in positions
-            xd[cleaner] = evaluate_poly(xddcoeffs, 1, t[loop]);
-            yd[cleaner] = evaluate_poly(yddcoeffs, 1, t[loop]);
-            zd[cleaner] = evaluate_poly(zddcoeffs, 1, t[loop]);
-            #do a check if the max speed has been exceeded
-            if( max_vel < sqrt((xd[cleaner])^2 + (yd[cleaner])^2 ))#+ (zd[cleaner])^2))
-                did_pass = false;
-                timeProbv = [timeProbv; t[loop]];
-            end
-            #Calculate the accelerations at every point
-            for p=(3:degree)+degree*(looper-1)
-                xdd[cleaner] += xcoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-                ydd[cleaner] += ycoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-                zdd[cleaner] += zcoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-                yawdd[cleaner] += pcoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-            end
-            #Calculate the jerks in position at every point
-            for p=(2:red_degree)
-                xddd[cleaner] += xddcoeffs[p]*t[loop]^(p-2)*(p-1)*(p)*(1+p);
-                yddd[cleaner] += yddcoeffs[p]*t[loop]^(p-2)*(p-1)*(p)*(1+p);
-                zddd[cleaner] += zddcoeffs[p]*t[loop]^(p-2)*(p-1)*(p)*(1+p);
-            end
-            #Calculate the yaw at every point
-            for p=(1:degree)+degree*(looper-1)
-                yaw[cleaner] += pcoeffs[p]*t[loop]^(p-(1+degree*(looper-1)));
-            end
-            #Calculate the body centered vector pointing up relative to robot body
-            z_B = [xdd[cleaner],ydd[cleaner],zdd[cleaner]]/
-                sqrt((xdd[cleaner])^2 + (ydd[cleaner])^2 + (zdd[cleaner]+gravity)^2);
-            #Calculate the x_c vector
-            x_c = [sin(yaw[cleaner]),cos(yaw[cleaner]),0.0];
-            #calculate y_B
-            y_B = cross(z_B,x_c);
-            #calculate x_B
-            x_B = cross(y_B, z_B)
-            #Calculate u1
-            u1 = mass*sqrt((xdd[cleaner])^2 + (ydd[cleaner])^2 + (zdd[cleaner]+gravity)^2);
-            #Calculate a_dot
-            a_dot = [xddd[cleaner],yddd[cleaner],zddd[cleaner]];
-            #Calculate h_w
-            h_w = mass/u1*(a_dot-dot(z_B,a_dot)*z_B);
-            #Calculate w_bc
-            w_bc = -dot(h_w,y_B)*x_B + dot(h_w,x_B)*y_B + yaw[cleaner]*dot(z_w,z_B)*z_B;
-            u2u3u4 = I*yawdd[cleaner]*z_w+cross(w_bc,I*w_bc);
-            u1_vec[cleaner] = u1;
-            u2_vec[cleaner] = u2u3u4[1];
-            u3_vec[cleaner] = u2u3u4[2];
-            u4_vec[cleaner] = u2u3u4[3];      
-
-        end
-
-    end
-
-    #Calculate the needed rpms
-    u_vec =[u1_vec'
-        u2_vec'
-        u3_vec'
-        u4_vec'];
-    rpms = u2rpms*u_vec
-    #println(size(rpms,1))
-    #println(size(rpms,2))
+    #create containers for problem points
+    xprob = zeros(0,1);
+    yprob = zeros(0,1);
+    ######################Simple Method#####################################
+    #Create a figure for debugging plots
     figure();
-    plot((timeRep),xd)
-    #println(timeRep)
-    #check that rpms are not above a certain threshold
-    for p = 1:4
-        timeProbm = [timeProbm; timeRep[find(rpms[p,:].>max_motor_rpm)]]
+    #For each segment
+    for seg = 1:num_poly
+        #Create indexing range for the coefficients
+        index_range = (1:degree)+degree*(seg-1);
+        #Get the coefficients of the polynomial
+        xcoeffs_s = xcoeffs[index_range];
+        ycoeffs_s = ycoeffs[index_range];
+        zcoeffs_s = zcoeffs[index_range];
+        pcoeffs_s = pcoeffs[index_range];
+        #Create the time vector for the polynomials, because of the way the problem is set up
+        # every polynomial must be evaluated from 0 to the end of its range and then shifted
+        t = collect(linspace(0,time_vec[seg+1]-time_vec[seg],time_res));
+        #Generate a time vector for plotting and reporting
+        timeRep = [timeRep; t+time_vec[seg]]
+        #Calculate the velocities
+        xd = evaluate_poly(xcoeffs_s,1,t);
+        yd = evaluate_poly(ycoeffs_s,1,t);
+        zd = evaluate_poly(zcoeffs_s,1,t);
+        #Calculate the velocities that the robot will experience
+        total_vel = sqrt(xd.^2 + yd.^2 + zd.^2);
+        #yawd = evaluate_poly(pcoeffs_s,1,t);
+        #Calculate the accelerations
+        #Calculate the jerks
+        #Calculate the snaps
+        #Compare against the limits and store time and points
+        timeProbv = [timeProbv; timeRep[find(total_vel .> max_vel)]];
+        xprob = evaluate_poly(xcoeffs_s,0,t[find(total_vel .> max_vel)]);
+        yprob = evaluate_poly(ycoeffs_s,0,t[find(total_vel .> max_vel)]);
+        #Note what time and position it occurs
+        #Plot the graphs for debugging
+        #figure();
+        #Plot Problem points on position graph
+        plot(t+time_vec[seg],zd);
     end
-    
-    #If timeProb v and m are not empty say so, velocity problems are to be notified first then motor probs
-    if(!isempty(timeProbv))
-        println("The path will break the speed limit")
-        return timeProbv;
-    end
-    if(!isempty(timeProbm))
-        println("The path will break the motor limits") 
-        return timeProbv;
-    end
-    return [];
-    
+    #Print debugging information
+    println(isempty(timeProbv))
+    #Plot points where path is infeasible
+    figure(); 
+    scatter(xprob, yprob); plot(xprob,yprob,color=:gray,linestyle=":");
+    #Return time locations where limits were exceeded.
+    return timeProbv;
+    ########################Complex method##################################
+    #In the complex method the copter is only limited by the motor, arbitrary
+    # limits can be applied should theoretically be unnecessary
+    #For each segment
+    #Calculate second derivatives of segments
+    #Calculate z_B - body frame up vector
+    #Calculate x_c
+    #Calculate y_B
+    #Calculate x_B
+    #Calculate third derivatives
+    #Calculate u1
+    #Calculate h_w
+    #Calculate yaws
+    #Calculate w_bw
+    #Calculate u2 u3 u4
+    #Calculate the rpms
+    #Compare to copter capabilities
+    #Note what times and positions did the path become infeasible
 end
