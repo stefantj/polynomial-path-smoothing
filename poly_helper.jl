@@ -739,15 +739,14 @@ end
 #Inputs
 # solution - an object containing points, and times
 # max_vel - the maximum velocity that the robot is limited to in ros
-# max_accel - the maximum acceleration that the robot is limited to 
-# max_jerk - the maximum jerk that the robot is limited to
-# max_snap - the maximum snap that the robot is limited to 
+# max_accel - the maximum position acceleration that the robot is limited to 
+# max_jerk - the maximum position jerk that the robot is limited to
 # max_motor_rpm - the maximum rpm that a motor can get
 #Outputs
 # did_pass - a boolean that is true when the path passes
 # timeProbv - a vector of times where motion is infeasible based on velocity
 # timeProbm - a vector of times where motion is infeasible based on velocity
-function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::Float64, max_jerk::Float64, max_snap::Float64, max_motor_rpm::Float64)
+function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::Float64, max_jerk::Float64, max_motor_rpm::Float64)
     #Extract important information from the solution object
     degree = 2 + 2*(solution.params.cont_order-1) #create the degree of each polynomial assuming 2 pts for each
     num_poly = solution.num_segs;
@@ -818,6 +817,12 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
     #create containers for problem points
     xprob = zeros(0,1);
     yprob = zeros(0,1);
+    xddprob = zeros(0,1);
+    yddprob = zeros(0,1);
+    xdddprob = zeros(0,1);
+    ydddprob = zeros(0,1);
+    xddddprob = zeros(0,1);
+    yddddprob = zeros(0,1);
     ######################Simple Method#####################################
     #Create a figure for debugging plots
     figure();
@@ -850,7 +855,14 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
         ydd = evaluate_poly(ycoeffs_s,2,t);
         zdd = evaluate_poly(zcoeffs_s,2,t);
         yawdd = evaluate_poly(xcoeffs_s,2,t);
+        #Calculate the total position acceleration
+        total_accel = sqrt(xdd.^2 + ydd.^2 + zdd.^2);
         #Calculate the jerks
+        xddd = evaluate_poly(xcoeffs_s,3,t);
+        yddd = evaluate_poly(ycoeffs_s,3,t);
+        zddd = evaluate_poly(zcoeffs_s,3,t);
+        #Calculate the total position jerk
+        total_jerk = sqrt(xddd.^2 + yddd.^2 + zddd.^2);
         #Calculate the snaps
         #Compare against the limits and store time and points
         #Velocity Limits
@@ -858,6 +870,13 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
         xprob = [xprob; evaluate_poly(xcoeffs_s,0,t[find(total_vel .> max_vel)])];
         yprob = [yprob; evaluate_poly(ycoeffs_s,0,t[find(total_vel .> max_vel)])];
         #Acceleration Limits
+        timeProbv = [timeProbv; timeRep[find(total_accel .> max_accel)]];
+        xddprob = [xddprob; evaluate_poly(xcoeffs_s,0,t[find(total_accel .> max_accel)])];
+        yddprob = [yddprob; evaluate_poly(ycoeffs_s,0,t[find(total_accel .> max_accel)])];
+        #Jerk Limits
+        timeProbv = [timeProbv; timeRep[find(total_jerk .> max_jerk)]];
+        xdddprob = [xdddprob; evaluate_poly(xcoeffs_s,0,t[find(total_jerk .> max_jerk)])];
+        ydddprob = [ydddprob; evaluate_poly(ycoeffs_s,0,t[find(total_jerk .> max_jerk)])];
         #Note what time and position it occurs
         #Plot the graphs for debugging
         #figure();
@@ -869,10 +888,12 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
     #Plot points where path is infeasible
     if(!isempty(timeProbv))
         figure(); 
-        xlabel("X"); ylabel("Y"); title("Portion of Path that is Infeasible");
+        xlabel("X"); ylabel("Y"); title("Portion of the Path that has Feasibility Problems");
         plot(x,y,color=:gray,linestyle=":"); #Path
         scatter(xprob, yprob); # Velocity Prob
-        legend(["Path","Velocity Prob"], loc=0)
+        scatter(xddprob, yddprob, color=:green);
+        scatter(xdddprob, ydddprob, color=:red);
+        legend(["Path","Velocity", "Acceleration", "Jerk"], loc=0)
     end
     #Return time locations where limits were exceeded.
     return timeProbv;
