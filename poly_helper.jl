@@ -607,7 +607,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_init_constr = size(find(prob.B_time_inds.==1),1);
     num_fin_constr  = size(find(prob.B_time_inds.==num_points),1);
 
-    times = float(collect(0:num_points-1))*30;
+    times = float(collect(0:num_points-1))*5;
 
 ## Here is where the gradient loop will start:
     # Form A matrix:
@@ -699,7 +699,7 @@ function test_multiseg(num_points)
     plot_poly_dim(sol,2,"x");
     plot_poly_dim(sol,3,"y");
 end
-
+ 
 #Function evaluate_poly evaluates a given derivative of a polynomial at a certain value
 #Assumptions
 # One dimensional polynomial
@@ -738,13 +738,16 @@ end
 # Polynomials of the same degree
 #Inputs
 # solution - an object containing points, and times
-# max_vel - the maximum velocity that the robot is limited too in ros
+# max_vel - the maximum velocity that the robot is limited to in ros
+# max_accel - the maximum acceleration that the robot is limited to 
+# max_jerk - the maximum jerk that the robot is limited to
+# max_snap - the maximum snap that the robot is limited to 
 # max_motor_rpm - the maximum rpm that a motor can get
 #Outputs
 # did_pass - a boolean that is true when the path passes
 # timeProbv - a vector of times where motion is infeasible based on velocity
 # timeProbm - a vector of times where motion is infeasible based on velocity
-function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rpm::Float64)
+function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::Float64, max_jerk::Float64, max_snap::Float64, max_motor_rpm::Float64)
     #Extract important information from the solution object
     degree = 2 + 2*(solution.params.cont_order-1) #create the degree of each polynomial assuming 2 pts for each
     num_poly = solution.num_segs;
@@ -792,6 +795,10 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rp
     xd = xdd;
     yd = xdd;
     zd = xdd;
+    #Needed for good plotting
+    x = zeros(Float64,0,1);
+    y = zeros(Float64,0,1);
+    z = zeros(Float64,0,1);
     #Needed for a_dot
     xddd = xdd;
     yddd = xdd;
@@ -828,20 +835,29 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rp
         t = collect(linspace(0,time_vec[seg+1]-time_vec[seg],time_res));
         #Generate a time vector for plotting and reporting
         timeRep = [timeRep; t+time_vec[seg]]
+        #Calculate positions
+        x = [x; evaluate_poly(xcoeffs_s,0,t)];
+        y = [y; evaluate_poly(ycoeffs_s,0,t)];
+        z = [z; evaluate_poly(zcoeffs_s,0,t)];
         #Calculate the velocities
         xd = evaluate_poly(xcoeffs_s,1,t);
         yd = evaluate_poly(ycoeffs_s,1,t);
         zd = evaluate_poly(zcoeffs_s,1,t);
         #Calculate the velocities that the robot will experience
         total_vel = sqrt(xd.^2 + yd.^2 + zd.^2);
-        #yawd = evaluate_poly(pcoeffs_s,1,t);
         #Calculate the accelerations
+        xdd = evaluate_poly(xcoeffs_s,2,t);
+        ydd = evaluate_poly(ycoeffs_s,2,t);
+        zdd = evaluate_poly(zcoeffs_s,2,t);
+        yawdd = evaluate_poly(xcoeffs_s,2,t);
         #Calculate the jerks
         #Calculate the snaps
         #Compare against the limits and store time and points
+        #Velocity Limits
         timeProbv = [timeProbv; timeRep[find(total_vel .> max_vel)]];
-        xprob = evaluate_poly(xcoeffs_s,0,t[find(total_vel .> max_vel)]);
-        yprob = evaluate_poly(ycoeffs_s,0,t[find(total_vel .> max_vel)]);
+        xprob = [xprob; evaluate_poly(xcoeffs_s,0,t[find(total_vel .> max_vel)])];
+        yprob = [yprob; evaluate_poly(ycoeffs_s,0,t[find(total_vel .> max_vel)])];
+        #Acceleration Limits
         #Note what time and position it occurs
         #Plot the graphs for debugging
         #figure();
@@ -849,10 +865,15 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rp
         plot(t+time_vec[seg],zd);
     end
     #Print debugging information
-    println(isempty(timeProbv))
+    println(xprob)
     #Plot points where path is infeasible
-    figure(); 
-    scatter(xprob, yprob); plot(xprob,yprob,color=:gray,linestyle=":");
+    if(!isempty(timeProbv))
+        figure(); 
+        xlabel("X"); ylabel("Y"); title("Portion of Path that is Infeasible");
+        plot(x,y,color=:gray,linestyle=":"); #Path
+        scatter(xprob, yprob); # Velocity Prob
+        legend(["Path","Velocity Prob"], loc=0)
+    end
     #Return time locations where limits were exceeded.
     return timeProbv;
     ########################Complex method##################################
