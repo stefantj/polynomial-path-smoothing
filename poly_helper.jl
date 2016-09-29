@@ -464,138 +464,59 @@ function form_Qbig(times,num_init, num_fin, cont_order)
     return Q;    
 end
 
-
-#function gradient_descent(prob::Poly2Segs,step_size)
-#    num_points = prob.num_segs+1;
+# for now, only optimize over total time ( not ratios )
+function gradient_descent(sol::PolySol,step_size)
+    num_points = sol.num_segs+1;
 
     # Compute cost for each segment by forming the Q matrices:
-#    costs_init = zeros(prob.num_segs) # vector of costs:
-#    costs_after = zeros(prob.num_segs) # vector of perturbed costs
-#    J=0;
-#    for seg=1:num_points-1
-#        Q_end = form_Q(prob.poly_prob.q_coeff, prob.times[seg+1]-prob.times[seg]); # Cost up to end point
-        
-        # Cost before perturbing: 
-#        costs_init[seg] = ((prob.x_coeffs[:,seg]'*Q_end*prob.x_coeffs[:,seg] + prob.y_coeffs[:,seg]'*Q_end*prob.y_coeffs[:,seg]))[1]
-#        J += costs_init[seg]
-#    end
-#    J+= prob.poly_prob.kT*prob.times[end]
+    num_init_constr = size(find(sol.poly_prob.B_time_inds.==1),1);
+    num_fin_constr = size(find(sol.poly_prob.B_time_inds.==num_points),1);
 
+    costs_init = zeros(sol.num_segs) # vector of costs:
+    costs_after = zeros(sol.num_segs) # vector of perturbed costs
+    J=0;
+    Q = form_Qbig(sol.times, num_init_constr, num_fin_constr, sol.params.cont_order); 
+    J = sol.x_coeffs'*Q*sol.x_coeffs + sol.y_coeffs'*Q*sol.y_coeffs + sol.z_coeffs'*Q*sol.z_coeffs + sol.p_coeffs'*Q*sol.p_coeffs + sol.poly_prob.kT*sol.times[end];
 
-    # Compute initial ratios:
-#    t_ratio = zeros(prob.num_segs);
-#    for seg=1:prob.num_segs
-#        t_ratio[seg] = (time_vec[seg+1]-time_vec[seg])/time_vec[end]
-#    end
-#    pert_size = 0.1; # perturb by 10%
-#    grad = zeros(prob.num_segs);
-#    pert_ratios = deepcopy(t_ratio);
-#
-#
-#    # Compute gradient for each segment:
-#    if(false)
-#    for seg= 1:prob.num_segs
-#        err = 0;
-#        for dir=-1:2:-1 # Optional to consider both increase an decrease. Default is to check decrease but otherwise increase.
-#
-#            # Form new time vector based on perturbation
-#            t_new = zeros(prob.num_segs+1);
-#            t_new[1] = prob.times[1];        
-#            
-#            # Total increase in time:
-#            t_increase = (prob.times[seg+1]-prob.times[seg])*(dir*pert_size);
-#            # Relative decrease in everything else:
-#            decrease = prob.times[end]/(prob.times[end]+t_increase);                            
-#
-#            for seg2=1:prob.num_segs
-#                ratio = 1.0;
-#                if(seg2==seg)
-#                    ratio=t_ratio[seg2]*(1+dir*pert_size)
-#                else
-#                    ratio=t_ratio[seg2]*decrease
-#                end
-#                dt = (prob.times[seg2+1]-prob.times[seg2])*ratio*prob.times[end];
-#                t_new[seg2+1] = dt + t_new[seg2];
-#            end
-#            
-#            # Compute gradient component:
-#            pnew = form_2segs(prob.poly_prob,t_new)
-#            solve_polyseg_problem(pnew)
-#            Q_end = form_Q(prob.poly_prob.q_coeff, t_new[seg+1]-t_new[seg])
-#            # Cost after perturbing: 
-#            costs_after[seg] = ((pnew.x_coeffs[:,seg]'*Q_end*pnew.x_coeffs[:,seg] + pnew.y_coeffs[:,seg]'*Q_end*pnew.y_coeffs[:,seg]))[1]
-#
-#            # Compute cost for kT:
-#            costs_after[seg] += prob.poly_prob.kT*( (t_new[seg+1]-t_new[seg]))
-#            
-#            # Gradient is increase in cost for having moved.
-#            # This is dumb, but: 
-#            grad[seg] = (costs_after[seg]-costs_init[seg])/(max(costs_after[seg],costs_init[seg]))
-#            grad[seg] = sign(grad[seg])*pert_size;
-##            if(costs_after[seg]-costs_init[seg] > 0) # Moving this way hurts, suggest going the other way:
-##                grad[seg] += sign(dir)*(-1);
-##            else
-##                grad[seg] += sign(dir)
-##            end
-#        end
-#        # This is dumb - fix later. Should depend on the error values. 
-#        # IF grad is positive, this means that both measurements agree that moving in the positive direction 
-#        if(grad[seg] == 0) # Means suggestion is to move positive
-##            pert_ratios[pt] = (1-step_size)*t_ratio[pt] + (step_size)*(t_ratio[pt]*(1-pert_size)) # Go the other way
-#            println("Zero error!")
-#        else
-#            pert_ratios[seg] = (1-step_size)*t_ratio[seg] + step_size*(t_ratio[seg]*(1-grad[seg])) # move in suggested direction
-#        end
-#    end
-#    end
+    # Now compute gradient with respect to total time:
+    t_scale = 1.0;
+    pert_size = 0.1
+    t_new = zeros(sol.num_segs+1);
+    t_new[1] = sol.times[1];
+    for pt=2:num_points
+        t_new[pt] = (1+pert_size)*sol.times[pt];
+    end
 
-#    println("1-G:\n",1-grad)
-#    println(pert_ratios)
-#    # Now compute gradient with respect to total time:
-#    t_scale = 1.0;
-#    t_new = zeros(prob.num_segs+1);
-#    t_new[1] = prob.times[1];
-#    for pt=2:num_points
-#        t_new[pt] = (1+pert_size)*prob.times[pt];
-#    end
+    newsol = poly_smoothing_with_times(sol.poly_prob, sol.params, t_new);
+    Qnew = form_Qbig(t_new, num_init_constr, num_fin_constr, sol.params.cont_order); 
+    new_cost = newsol.x_coeffs'*Qnew*newsol.x_coeffs + newsol.y_coeffs'*Qnew*newsol.y_coeffs + newsol.z_coeffs'*Qnew*newsol.z_coeffs + newsol.p_coeffs'*Qnew*newsol.p_coeffs + sol.poly_prob.kT*t_new[end];
 
-#    pnew = form_2segs(prob.poly_prob,t_new)
-#    solve_polyseg_problem(pnew)
-#    new_cost = 0;
-#    for seg=1:prob.num_segs
-#        Q_end = form_Q(prob.poly_prob.q_coeff, t_new[seg+1]-t_new[seg])
-#        # Cost after perturbing: 
-#        new_cost += ((pnew.x_coeffs[:,seg]'*Q_end*pnew.x_coeffs[:,seg] + pnew.y_coeffs[:,seg]'*Q_end*pnew.y_coeffs[:,seg]))[1]
-#    end
-#    new_cost += prob.poly_prob.kT*t_new[end];
-#
-#    err = step_size*(new_cost-J)/max(new_cost,J)
-#    
-#    t_scale= 1-err;
-#    println("NC: $new_cost, J: $J");
-#    println("Tscale = $t_scale")
-#
-#    if(J > new_cost) # increase helped
-#        t_scale = 1+pert_size;
-#    else  #Increase hurt
-#        t_scale = 1-pert_size;
-#    end    
-#    
-#    ## Now we take the gradient step:
-#    tvec_new = zeros(prob.num_segs+1);
-#    tvec_new[1] = prob.times[1];
-#    for seg=1:prob.num_segs
-#        dt = t_scale * prob.times[end]*pert_ratios[seg]
-#        tvec_new[seg+1] = dt + tvec_new[seg];
-#    end
-#    println("Tvec: $tvec_new");
-#    return tvec_new, J
-#end
+    err = step_size*(new_cost-J)/max(new_cost,J)
+    
+    t_scale= 1-err;
+    println("NC: $new_cost, J: $J");
+    println("Tscale = $t_scale")
 
+    if(J[1] > new_cost[1]) # increase helped
+        t_scale = 1+pert_size;
+    else  #Increase hurt
+        t_scale = 1-pert_size;
+    end    
+    
+    ## Now we take the gradient step:
+    tvec_new = zeros(sol.num_segs+1);
+    tvec_new[1] = sol.times[1];
+    for seg=1:sol.num_segs
+        dt = t_scale *(sol.times[seg+1]-sol.times[seg])
+        tvec_new[seg+1] = dt + tvec_new[seg];
+    end
+    println("Tvec: $tvec_new");
+    return tvec_new, J
+end
 
 # Smooths the given polynomial problem. 
 # Answer is returned as a piecewise-polynomial with specified degree of continuity
-function poly_smoothing(prob::PolyProblem, param::PolyParams)
+function poly_smoothing_with_times(prob::PolyProblem, param::PolyParams,times::Vector{Float64})
     # Extract information to form Abig:
     num_points = maximum(prob.B_time_inds);
 
@@ -604,9 +525,6 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_init_constr = size(find(prob.B_time_inds.==1),1);
     num_fin_constr  = size(find(prob.B_time_inds.==num_points),1);
 
-    times = float(collect(0:num_points-1));
-
-## Here is where the gradient loop will start:
     # Form A matrix:
 
     tic();
@@ -617,7 +535,6 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     figure(5); spy(A);
 
     tic();
-#    Ainv = inv(A);
     AiC = Ainv*C; # This is about 10% time, and can be fixed by just selecting rows/columns
     t_Ainv = toq();
 
@@ -650,12 +567,92 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
 #    println("Q:    ", t_Q, "\t", t_Q/t_tot);
 #    println("opt:  ", t_opt, "\t", t_opt/t_tot); 
 
-## This is where the gradient should be updated and times recomputed
-
-## Here is where the gradient loop stops
-
     sol = PolySol(prob, param, num_points-1, times, x_coeffs, y_coeffs, z_coeffs, p_coeffs); 
     return sol
+end
+
+
+# Smooths the given polynomial problem. 
+# Answer is returned as a piecewise-polynomial with specified degree of continuity
+function poly_smoothing(prob::PolyProblem, param::PolyParams)
+    # Extract information to form Abig:
+    num_points = maximum(prob.B_time_inds);
+
+    num_fixed = size(prob.B_x,1);
+
+    num_init_constr = size(find(prob.B_time_inds.==1),1);
+    num_fin_constr  = size(find(prob.B_time_inds.==num_points),1);
+
+    times = float(collect(0:num_points-1))*10;
+    num_grad_steps = 10;
+    step_size = 0.8;
+    best_cost = Inf;
+    best_sol = [];
+
+    times_trace = zeros(num_grad_steps);
+    cost_trace = zeros(num_grad_steps);
+
+## Here is where the gradient loop will start:
+    for step=1:num_grad_steps
+        # Form A matrix:
+
+        tic();
+        A,Ainv,C = form_Abig(prob, param, times);
+        num_unique = size(C,2);
+        t_Abig = toq();
+
+        figure(5); spy(A);
+
+        tic();
+    #    Ainv = inv(A);
+        AiC = Ainv*C; # This is about 10% time, and can be fixed by just selecting rows/columns
+        t_Ainv = toq();
+
+        tic();
+        # Form Q matrix:
+        Q = form_Qbig(times, num_init_constr, num_fin_constr, param.cont_order); 
+        t_Q = toq();
+
+        tic();
+        # Compute free variables:
+        R = AiC'*(Q*AiC);
+    # should be a householder multiply here
+        opt_mat = - ( R[num_fixed+1:num_unique, num_fixed+1:num_unique])\R[1:num_fixed, num_fixed+1:num_unique]';
+
+        bx = [prob.B_x; opt_mat*prob.B_x];
+        by = [prob.B_y; opt_mat*prob.B_y];
+        bz = [prob.B_z; opt_mat*prob.B_z];
+        bp = [prob.B_p; opt_mat*prob.B_p];
+
+        x_coeffs = AiC*bx;
+        y_coeffs = AiC*by;
+        z_coeffs = AiC*bz;
+        p_coeffs = AiC*bp;
+        t_opt = toq();
+
+        t_tot = t_Abig+t_Ainv+t_Q+t_opt;
+    #    println("Timing breakdown:");
+    #    println("Abig: ", t_Abig, "\t", t_Abig/t_tot);
+    #    println("Ainv: ", t_Ainv, "\t", t_Ainv/t_tot);
+    #    println("Q:    ", t_Q, "\t", t_Q/t_tot);
+    #    println("opt:  ", t_opt, "\t", t_opt/t_tot); 
+        sol = PolySol(prob, param, num_points-1, times, x_coeffs, y_coeffs, z_coeffs, p_coeffs); 
+
+        times, J = gradient_descent(sol, step_size);
+        times_trace[step] = times[end];
+        cost_trace[step] = J[1];
+
+        if(J[1] < best_cost)
+            best_cost = J[1];
+            best_sol = sol;
+        end
+    end
+
+
+    figure(7); clf(); 
+    subplot(2,1,1); plot(1:num_grad_steps, cost_trace); xlabel("Iteration"); ylabel("Cost");
+    subplot(2,1,2); plot(1:num_grad_steps, times_trace); xlabel("Iteration"); ylabel("Path time");
+    return best_sol
 end
 
 
@@ -697,163 +694,3 @@ function test_multiseg(num_points)
     plot_poly_dim(sol,3,"y");
 end
 
-#Function verifyActuateablePath checks if the smooth path is feasible given robots limits
-#Assumptions
-# Robot follows the quadrotor model set out by Minimum  Snap  Trajectory  Generation  and  Control  for  Quadrotors - Mellinger
-# Euler angles of Z-X-Y
-# Polynomials of the same degree
-#Inputs
-# solution - an object containing points, and times
-# max_vel - the maximum velocity that the robot is limited too in ros
-# max_motor_rpm - the maximum rpm that a motor can get
-#Outputs
-# did_pass - a boolean that is true when the path passes
-function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_motor_rpm::Float64)
-    #Extract important information from the solution object
-    degree = 2 + 2*solution.params.cont_order #create the degree of each polynomial assuming 2 pts for each
-    num_poly = solution.num_segs;
-    xcoeffs = solution.x_coeffs;
-    ycoeffs = solution.y_coeffs;
-    zcoeffs = solution.z_coeffs;
-    pcoeffs = solution.p_coeffs;
-    time_vec = solution.times;
-    
-    #Set some important constants for this function
-    did_pass = true;
-    time_res = 100 #The resolution segments 
-    red_degree_by = 2; #The two is because the we are taking the derivative twice
-    red_degree = degree - red_degree_by; #create a reduced degree to used for the dd and ddd calcs
-    #Needed Constants for calculating the motor rpm to be on path
-    z_w = [0,0,1]; #the up vector for the world frame
-    Jxx = 0.0036404; #Values for the inertia matrix maybe can take from somewhere
-    Jyy = 0.0053670;
-    Jzz = 0.0030522;
-    Jxy = 2.9264e-6;
-    Jxz = 2.3411e-5;
-    Jyz = 0.0001756;
-    I = [Jxx Jxy Jxz
-        Jxy Jyy Jyz
-        Jxz Jyz Jzz];
-    gravity = 9.8; 
-    u2rpm_1 = 5096839.959225280;  #Values for an inverted allocation matrix to convert input into rpm
-    u2rpm_2 = 51485858.53986801;  #Can probably get from code already coded
-    u2rpm_3 = -51485858.53986803;
-    u2rpm_4 = 330817430.2740964;
-    u2rpms = [u2rpm_1 u2rpm_2 u2rpm_3 u2rpm_4 #inverted allocation matrix
-        u2rpm_1 -u2rpm_2 -u2rpm_3 u2rpm_4
-        u2rpm_1 u2rpm_2 -u2rpm_3 -u2rpm_4
-        u2rpm_1 -u2rpm_2 u2rpm_3 -u2rpm_4];
-    mass = 800;
-
-    #####################
-    #create variables to hold values initialize containers with zeros
-    #Needed for z_B and u1
-    xdd = zeros(num_poly*time_res);
-    ydd = xdd;
-    zdd = xdd;
-    #Needed for speed check
-    xd = xdd;
-    yd = xdd;
-    zd = xdd;
-    #Needed for a_dot
-    xddd = xdd;
-    yddd = xdd;
-    zddd = xdd;
-    #Needed for the inputs to the copter
-    u1_vec = xdd;
-    u2_vec = xdd;
-    u3_vec = xdd;
-    u4_vec = xdd;
-    #Needed initializations
-    z_B = 0; #variable to hold the up body vector of copter
-    #Needed for coefficients and angular acceleration
-    yawdd = xdd;
-    yaw = xdd;
-
-    #Loop through all segments
-    for looper = 1:(num_poly)
-        #Create time vector
-        t = linspace(time_vec[looper],time_vec[looper+1],time_res);
-        #update coeffs for ever poly
-        xddcoeffs = xcoeffs[(red_degree_by+1:degree)+degree*(looper-1)];
-        yddcoeffs = ycoeffs[(red_degree_by+1:degree)+degree*(looper-1)];
-        zddcoeffs = zcoeffs[(red_degree_by+1:degree)+degree*(looper-1)];
-        pddcoeffs = pcoeffs[(red_degree_by+1:degree)+degree*(looper-1)];
-        
-        for loop=1:time_res
-            cleaner = (looper-1)*time_res+loop;
-            #Calculate the velocity in positions
-            for p=(2:degree)+degree*(looper-1)
-                xd[cleaner] += xcoeffs[p]*t[loop]^(p-2-degree*(looper-1))*(p-1-degree*(looper-1));
-                yd[cleaner] += ycoeffs[p]*t[loop]^(p-2-degree*(looper-1))*(p-1-degree*(looper-1));
-                zd[cleaner] += zcoeffs[p]*t[loop]^(p-2-degree*(looper-1))*(p-1-degree*(looper-1));
-            end
-            #do a check if the max speed has been exceeded
-            if( max_vel < sqrt((xd[cleaner])^2 + (yd[cleaner])^2 + (zd[cleaner])^2))
-                did_pass = false;
-                return did_pass;
-            end
-            #Calculate the accelerations at every point
-            for p=(3:degree)+degree*(looper-1)
-                xdd[cleaner] += xcoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-                ydd[cleaner] += ycoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-                zdd[cleaner] += zcoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-                yawdd[cleaner] += pcoeffs[p]*t[loop]^(p-3-degree*(looper-1))*(p-1-degree*(looper-1))*(p-2-degree*(looper-1));
-            end
-            #Calculate the jerks in position at every point
-            for p=(2:red_degree)
-                xddd[cleaner] += xddcoeffs[p]*t[loop]^(p-2)*(p-1)*(p)*(1+p);
-                yddd[cleaner] += yddcoeffs[p]*t[loop]^(p-2)*(p-1)*(p)*(1+p);
-                zddd[cleaner] += zddcoeffs[p]*t[loop]^(p-2)*(p-1)*(p)*(1+p);
-            end
-            #Calculate the yaw at every point
-            for p=(1:degree)+degree*(looper-1)
-                yaw[cleaner] += pcoeffs[p]*t[loop]^(p-(1+degree*(looper-1)));
-            end
-            #Calculate the body centered vector pointing up relative to robot body
-            z_B = [xdd[cleaner],ydd[cleaner],zdd[cleaner]]/
-                sqrt((xdd[cleaner])^2 + (ydd[cleaner])^2 + (zdd[cleaner]+gravity)^2);
-            #Calculate the x_c vector
-            x_c = [sin(yaw[cleaner]),cos(yaw[cleaner]),0.0];
-            #calculate y_B
-            y_B = cross(z_B,x_c);
-            #calculate x_B
-            x_B = cross(y_B, z_B)
-            #Calculate u1
-            u1 = mass*sqrt((xdd[cleaner])^2 + (ydd[cleaner])^2 + (zdd[cleaner]+gravity)^2);
-            #Calculate a_dot
-            a_dot = [xddd[cleaner],yddd[cleaner],zddd[cleaner]];
-            #Calculate h_w
-            h_w = mass/u1*(a_dot-dot(z_B,a_dot)*z_B);
-            #Calculate w_bc
-            w_bc = -dot(h_w,y_B)*x_B + dot(h_w,x_B)*y_B + yaw[cleaner]*dot(z_w,z_B)*z_B;
-            u2u3u4 = I*yawdd[cleaner]*z_w+cross(w_bc,I*w_bc);
-            u1_vec[cleaner] = u1;
-            u2_vec[cleaner] = u2u3u4[1];
-            u3_vec[cleaner] = u2u3u4[2];
-            u4_vec[cleaner] = u2u3u4[3];      
-
-        end
-
-    end
-
-    #Calculate the needed rpms
-    u_vec =[u1_vec'
-        u2_vec'
-        u3_vec'
-        u4_vec'];
-    rpms = u2rpms*u_vec
-    println(size(rpms,1))
-    println(size(rpms,2))
-    plot((1:num_poly*time_res),rpms[1,:])
-    #check that rpms are not above a certain threshold
-    if(any(rpms.>max_motor_rpm))
-        println("Motors Cannot Drive This")
-        did_pass = false;
-        return did_pass;
-    end
-    
-    #If made it threw the code it passed
-    return did_pass;
-    
-end
