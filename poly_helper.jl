@@ -29,6 +29,29 @@ type PolySol                  # For 1 segment per pair of points
 end
 
 
+# Yet another set of poly types to use...
+# Used to store locations in the configuration space
+type Point
+   x::Float64
+   y::Float64
+   z::Float64
+   p::Float64
+end# Used to store the optimal polynomial that connects two points.
+type poly_segment
+# Coefficients of the polynomial
+   x_coeffs::Vector{Float64}
+   y_coeffs::Vector{Float64}
+   z_coeffs::Vector{Float64}
+   p_coeffs::Vector{Float64}
+   t::Float64 # Time of the polynomial segment
+   q::Float64 # Cost of segment
+   cells::Vector{Int64} # List of points which are spaced to reduce collision check times.
+   init_config::Vector{Point} # Initial position, velocity, acceleration
+   final_config::Vector{Point} # Final position, velocity, acceleration
+end
+
+
+
 # Forms a vanilla problem
 function random_poly_prob(num_points::Int64, cont_order)
     # Random points
