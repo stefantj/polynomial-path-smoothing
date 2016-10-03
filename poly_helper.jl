@@ -607,7 +607,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_init_constr = size(find(prob.B_time_inds.==1),1);
     num_fin_constr  = size(find(prob.B_time_inds.==num_points),1);
 
-    times = float(collect(0:num_points-1))*5;
+    times = float(collect(0:num_points-1))*1;
 
 ## Here is where the gradient loop will start:
     # Form A matrix:
