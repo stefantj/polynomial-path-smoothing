@@ -6,19 +6,19 @@ using PyPlot
 include("poly_helper.jl");
 
 # The order of the constraints is defined by the size of the vectors
-function connect_points(init_config::Vector{Point}, final_config::Vector{Point}, Q_coeffs)## >> These are already implemented/ Stefan can update them << ##
+#function connect_points(init_config::Vector{Point}, final_config::Vector{Point}, Q_coeffs)## >> These are already implemented/ Stefan can update them << ##
     # Make a polyseg to test. Note that this is not a real polysegment, and inconsistent.
-    x_coeffs = [1,1,1,-0.4,0];
-    y_coeffs = [1,3,-.3,.01,0];
-    z_coeffs = [0,1,0,0,0];
-    p_coeffs = zeros(5);
-    t=3.0
-    q = 0.0;
-    cells = [1,2,3,4,5,104,203,301,402];
-    init_config = [Point(0.0,0.0,0.0,0.0)];
-    final_config = [Point(0.0,0.0,0.0,0.0)];
-    return poly_segment(x_coeffs,y_coeffs,z_coeffs,p_coeffs,t,q,cells,init_config,final_config);
-end
+#    x_coeffs = [1,1,1,-0.4,0];
+#    y_coeffs = [1,3,-.3,.01,0];
+#    z_coeffs = [0,1,0,0,0];
+#    p_coeffs = zeros(5);
+#    t=3.0
+#    q = 0.0;
+#    cells = [1,2,3,4,5,104,203,301,402];
+#    init_config = [Point(0.0,0.0,0.0,0.0)];
+#    final_config = [Point(0.0,0.0,0.0,0.0)];
+#    return poly_segment(x_coeffs,y_coeffs,z_coeffs,p_coeffs,t,q,cells,init_config,final_config);
+#end
 
 ##### Occupancy grid helper functions #### 
 # Let's work in a 10m x 10m environment with resolution .1m
@@ -91,10 +91,12 @@ println("Order is $order");
 
 
     # Should add more checks such as confirming velocity
+    #Print the velocities
 end
 
 
 function test_tester()
-    polyseg=connect_points([Point(0.0,0.0,0.0,0.0)], [Point(0.0,0.0,0.0,0.0)], zeros(5))
+    polyseg = connect_points([Point(10.0,6.0,9.0,0.0);Point(0.0,0.0,0.0,0.0);Point(0.0,0.0,0.0,0.0)], 
+        [Point(1.0,1.0,1.0,0.0);Point(0.0,0.0,0.0,0.0);Point(0.0,0.0,0.0,0.0)], q_coeff);
     check_poly_segment(polyseg)
 end
