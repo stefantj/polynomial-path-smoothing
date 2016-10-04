@@ -64,7 +64,7 @@ function check_poly_segment(poly::poly_segment)
     # plot the grid (floor level slice)
     figure(1,figsize=(6,6)); clf(); 
     width = get_grid_extent();
-    imshow(check_grid[:,:,1]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    imshow(check_grid[1,:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
 
     # Plot the polynomial:
     num_tsteps=100;
@@ -80,7 +80,7 @@ println("Order is $order");
         ys += poly.y_coeffs[ord].*(times.^(ord-1))
         zs += poly.z_coeffs[ord].*(times.^(ord-1))
     end
-    plot(xs,ys,color=:red, linewidth=2);
+    #plot(xs,ys,color=:red, linewidth=2);
 
     # Try 3D plot
     figure(2); clf();
@@ -96,7 +96,9 @@ end
 
 
 function test_tester()
-    polyseg = connect_points([Point(10.0,6.0,9.0,0.0);Point(0.0,0.0,0.0,0.0);Point(0.0,0.0,0.0,0.0)], 
-        [Point(1.0,1.0,1.0,0.0);Point(0.0,0.0,0.0,0.0);Point(0.0,0.0,0.0,0.0)], q_coeff);
+    polyseg = connect_points([Point(0.0,6.0,9.0,1.0);Point(0.0,-0.25,0.0,0.0);Point(0.0,0.0,0.0,0.0)], 
+        [Point(0.0,2.0,5.0,0.0);Point(0.0,0.0,0.25,0.0);Point(0.0,0.0,0.0,0.0)], q_coeff);
+    #polyseg.cells = collect(1:50:2000);
+    println("out of connnect");
     check_poly_segment(polyseg)
 end

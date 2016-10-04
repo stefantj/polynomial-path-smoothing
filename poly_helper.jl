@@ -771,7 +771,7 @@ end
 # timeProbm - a vector of times where motion is infeasible based on velocity
 function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::Float64, max_jerk::Float64, max_motor_rpm::Float64)
     #Extract important information from the solution object
-    degree = 2 + 2*(solution.params.cont_order-1) #create the degree of each polynomial assuming 2 pts for each
+    degree = 2 + 2*(solution.params.cont_order-1)+1 #create the degree of each polynomial assuming 2 pts for each
     num_poly = solution.num_segs;
     xcoeffs = solution.x_coeffs;
     ycoeffs = solution.y_coeffs;
@@ -904,20 +904,21 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
         #Plot the graphs for debugging
         #figure();
         #Plot Problem points on position graph
-        plot(t+time_vec[seg],zd);
+        #plot(t+time_vec[seg],zddd);
+        #title("Problem")
     end
     #Print debugging information
-    println(xprob)
+    #println(xprob)
     #Plot points where path is infeasible
-    if(!isempty(timeProbv))
-        figure(); 
-        xlabel("X"); ylabel("Y"); title("Portion of the Path that has Feasibility Problems");
-        plot(x,y,color=:gray,linestyle=":"); #Path
-        scatter(xprob, yprob); # Velocity Prob
-        scatter(xddprob, yddprob, color=:green);
-        scatter(xdddprob, ydddprob, color=:red);
-        legend(["Path","Velocity", "Acceleration", "Jerk"], loc=0)
-    end
+    #if(!isempty(timeProbv))
+    #    figure(); 
+    #    xlabel("X"); ylabel("Y"); title("Portion of the Path that has Feasibility Problems");
+    #    plot(x,y,color=:gray,linestyle=":"); #Path
+    #    scatter(xprob, yprob); # Velocity Prob
+    #    scatter(xddprob, yddprob, color=:green);
+    #    scatter(xdddprob, ydddprob, color=:red);
+    #    legend(["Path","Velocity", "Acceleration", "Jerk"], loc=0)
+    #end
     #Return time locations where limits were exceeded.
     return timeProbv;
     ########################Complex method##################################
@@ -939,3 +940,293 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
     #Compare to copter capabilities
     #Note what times and positions did the path become infeasible
 end
+
+
+
+
+
+
+
+#Funtion occupancyCell checker gets a path and finds the unique cell IDs in the occupancy grid that the path goes through
+#Assumptions
+# An occupancy function exists that is called as follows ID = occupancy_get_id(x,y,z)
+# Path starts at zero
+# Solution has coefficient vectors of the same length
+#Inputs/Needed Variables
+# solution - an object containing points, and times related to path solution
+# grid_resx - the resolution of the grid in the x direction
+# grid_resy - the resolution of the grid in the y direction
+# grid_resz - the resolution of the grid in the z direction
+# dim - the dimension of the path to be checked
+# aggressParam - a parameter of how aggressive to check a path (0,infty), Closer to 0 means check every point on the path, Closer to infinity => check no points
+#Outputs
+# occupancy_vec - a vector of the occupancy IDs that the polynomial is characterized by
+function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::Float64, grid_resz::Float64, dim::Int64, aggressParam::Float64)
+    #Check if the dimension is reasonable otherwise print error and exit;
+    if(dim < 1 || dim > 3)
+        println("Invalid dimension entered")
+        return -1;
+    end
+
+    #Read in the coefficients into a matrix
+    coeffMat = [solution.x_coeffs'; solution.y_coeffs'; solution.z_coeffs'];
+    #Create a holder for derivatives, delta_t's, and pts when we get there in the for loop
+    derivMat = zeros(dim);
+    delta_t = zeros(dim);
+    pts = zeros(dim);
+    #prevPt = zeros(dim);
+    occupancy_vec = zeros(Int64, 0,1);
+    
+
+    
+    #Initialize/read in the resolution variables if needed
+    #grid_resx = 0.05;
+    #grid_resy = 0.05;
+    #grid_resz = 0.05;
+    #Initialize times assuming polynomials are solve at 0 time initial
+    t = 0;
+    timeFin = solution.times[end] - solution.times[1];
+    #Time step will give you the resolution of the time steps in the loops
+    timeStep = timeFin/1000.0;
+    #Calculate the distance time to travel in each direction before getting occupancy grid id using 1st order taylor series approximation
+    dist_x = grid_resx * aggressParam;
+    dist_y = grid_resy * aggressParam;
+    dist_z = grid_resz * aggressParam;
+    #Put into a matrix
+    dist_to_travel = [dist_x; dist_y; dist_z]
+    #Loop for 2 or 3 dimensions if dim >3
+    for looper = 1:dim
+        #Create previous point vector
+        pts[looper] = evaluate_poly(coeffMat[looper,:],0,t);
+        #Create a variable to change temporarily
+        t_new = t;
+        counter = 0;
+        #Calculate the time at which the change in distance is more than our distance to travel
+        while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < dist_to_travel[looper] && counter < 1000)
+            #If we haven't gotten higher than what we want to travel increment the time
+            t_new += timeStep;
+            #println(t_new)
+            counter += 1;
+        end
+        #println("past first while")
+        #Set the new delta_t
+        delta_t[looper] = abs(t_new - t);
+        #evaluate the polynomial first direvative at current time
+        #derivMat[looper] = evaluate_poly(coeffMat[looper, :], 1, t);
+        #if(derivMat[looper] == 0)
+        #    derivMat[looper] = 1;
+        #end
+        #looper = 1 -> x, 2 -> y, 3 -> z
+        #find the required delta_t's needed to go the set distance before checking occupancy
+        #delta_t[looper] = abs(dist_to_travel[looper] / derivMat[looper]);
+    end
+
+    #Create a counter
+    counter1 =1;
+
+    #Check if at the or past the end time and while loop if not passed it
+    while(t < timeFin && counter1 < 100)
+        #Find the smallest one
+        changeDelta, deltaIndex = findmin(delta_t)
+        #Move the time by the smallest one
+        t += changeDelta;
+        #Decrease the delta t's for the others
+        for looper = 1:dim
+            #Subract the smallest delta t from the other deltas
+            delta_t[looper] -= changeDelta;
+        end
+        #Find the x,y,z of the current time
+        for looper = 1:dim
+            pts[looper] = evaluate_poly(coeffMat[looper, :], 0, t);
+        end
+        #Find occupancy ID at current point by adding to a vector
+        occupancy_vec = [occupancy_vec; occupancy_get_id(pts[1], pts[2], pts[3])];
+        #println(occupancy_vec)
+        #println(changeDelta)
+        #Evaluate the new delta_t for the dimension
+        for looper = 1:dim
+            if(delta_t[looper] == 0)
+                #Create previous point vector
+                #pts[looper] = evaluate_poly(coeffMat[looper,:],0,t);
+                #Create a variable to change temporarily
+                t_new = t;
+                counter = 0;
+                #Calculate the time at which the change in distance is more than our distance to travel
+                while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < dist_to_travel[looper] && counter < 1000)
+                    #If we haven't gotten higher than what we want to travel increment the time
+                    t_new += timeStep;
+                    counter += 1;
+                end
+                #Set the new delta_t
+                delta_t[looper] = abs(t_new - t);
+            end
+        end
+        #derivMat[deltaIndex] = evaluate_poly(coeffMat[deltaIndex, :], 1, t);
+        #Make sure the derivative is not zero
+        #if(derivMat[deltaIndex] == 0)
+        #    derivMat[deltaIndex] = 1;
+        #end
+        #delta_t[deltaIndex] = abs(dist_to_travel[deltaIndex]/derivMat[deltaIndex]);
+        #Increment counter
+        counter1 += 1;
+    end
+
+    #Return the vector of unique occupancy grids
+    return unique(occupancy_vec);
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Function connect_points connects two points with a minimum cost polynomial. Returns a poly_segment.
+#Assumptions
+# The order of the constraints is defined by the size of the vectors
+#Inputs
+# init_config - the initial position (x, y, z, and yaw), velocity, and acceleration
+# final_config - the final position (x, y, z, and yaw), velocity, and acceleration
+#Outputs
+# polySeg - a poly segment struct
+function connect_points(init_config::Vector{Point}, final_config::Vector{Point}, Q_coeffs)
+    #########################Read in the constraints (Improve later)#####################################
+    cont_order = 3;
+    # Random points
+    xpts = [init_config[1].x; final_config[1].x];
+    ypts = [init_config[1].y; final_config[1].y];
+    zpts = [init_config[1].z; final_config[1].z];
+    ppts = [init_config[1].p; final_config[1].p];
+
+    #Create a num_points varialbe
+    num_points = length(xpts);
+    num_pts = num_points;
+    # Initial derivative constraints: 
+    #          vel acc
+    bx_init = [init_config[2].x; init_config[3].x];
+    by_init = [init_config[2].y; init_config[3].y];
+    bz_init = [init_config[2].z; init_config[3].z];
+    bp_init = [init_config[2].p; init_config[3].p];
+    # Final derivative constraints:
+    bx_final = [final_config[2].x; final_config[3].x];
+    by_final = [final_config[2].y; final_config[3].y];
+    bz_final = [final_config[2].z; final_config[3].z];
+    bp_final = [final_config[2].p; final_config[3].p];
+    
+    ######################### Assemble constraint variables: ##########################################
+    # Total B vectors:
+    B_x = [xpts[1]; bx_init; xpts[2:end]; bx_final];
+    B_y = [ypts[1]; by_init; ypts[2:end]; by_final];
+    B_z = [zpts[1]; bz_init; zpts[2:end]; bz_final];
+    B_p = [ppts[1]; bp_init; ppts[2:end]; bp_final];
+    # Order of constraints, in order of B_x
+    #           Initial derivatives          final derivatives    Free jerk derivative
+    B_orders = [collect(0:cont_order-1); collect(0:cont_order-1); 3];
+    # Time indices of constraints:                                  #added another for the free derivative
+    B_time_inds = [ones(Int64,cont_order); num_points*ones(Int64,cont_order); num_points];
+
+    degree = num_points+2*(cont_order-1);
+    #### Define our cost metrics ####
+    # Q coeffs: weight which derivatives you care about:
+    q_coeff = Q_coeffs;
+    # Total time penalty
+    kT = 50000; 
+    prob = PolyProblem(B_x,B_y,B_z,B_p,round(Int64,B_orders),round(Int64,B_time_inds),q_coeff,kT);
+    ##################################################################################################
+    times = float(collect(0:num_points-1));
+
+    #Create the polyparams object   
+    param = PolyParams(cont_order);
+    
+    num_fixed = size(prob.B_x,1);
+    tot_degree = length(B_orders);
+    
+    #Start a while loop to loop until the path is feasible
+    errorExist = true;
+    counter = 1;
+    while(errorExist)
+        #Create A matrix
+        A = zeros(tot_degree, tot_degree)
+        for k=1:tot_degree
+            A[k,:] = constr_order(B_orders[k], times[B_time_inds[k]],tot_degree);
+        end
+
+        #Set things equal
+        A_inv = inv(A);
+    ########################33Here is where the gradient loop will start:##############################
+    ##################################################################################################
+        # Form A matrix:
+        num_unique = tot_degree;
+
+        figure(5); spy(A);
+    #    Ainv = inv(A);
+        AiC = A_inv; # This is about 10% time, and can be fixed by just selecting rows/columns
+        # Form Q matrix:
+        Q = form_Q(q_coeff, times[end]-times[1]); 
+        # Compute free variables:
+        R = AiC'*(Q*AiC);
+    # should be a householder multiply here
+        opt_mat = - ( R[num_fixed+1:num_unique, num_fixed+1:num_unique])\R[1:num_fixed, num_fixed+1:num_unique]';
+
+        bx = [prob.B_x; opt_mat*prob.B_x];
+        by = [prob.B_y; opt_mat*prob.B_y];
+        bz = [prob.B_z; opt_mat*prob.B_z];
+        bp = [prob.B_p; opt_mat*prob.B_p];
+
+        x_coeffs = AiC*bx;
+        y_coeffs = AiC*by;
+        z_coeffs = AiC*bz;
+        p_coeffs = AiC*bp;
+        #Put into a PolySol object
+        sol = PolySol(prob, param, num_points-1, times, x_coeffs, y_coeffs, z_coeffs, p_coeffs); 
+
+
+        #Return the poly_seg type
+        #return poly_segment(x_coeffs,y_coeffs, z_coeffs, p_coeffs, times[end], cost, cells, init_config, final_config)
+    ## This is where the gradient should be updated and times recomputed
+
+    ## Here is where the gradient loop stops
+
+
+
+        #Create a time vector
+        #time = collect(linspace(0,times[end]));
+        #figure();
+        #plot(evaluate_poly(x_coeffs,0,time),evaluate_poly(y_coeffs,0,time))
+
+        #Max Velocity and Acceleration taken from what is used in pikachu launch files
+        #Max Jerk guessed
+        errorTimes = verifyActuateablePath(sol, 2.0, 0.65, 10.0, 100000000000000.0);
+
+        #Redo the calculation with a larger time if there are errors
+        if(!isempty(errorTimes) && counter < 100)
+            #Increment by 1 second every time
+            counter += 1;
+            times = float(collect(0:num_points-1)) * counter;
+            println(times);
+        else
+            errorExist = false;
+            println("past verify")
+            #Find the cells of that the polynomial passes through
+            cells = occupancyCellChecker(sol, get_grid_resolution(), get_grid_resolution(), get_grid_resolution(), 3, 0.8);
+            println("past occupancy");
+            #Record the final cost of the poly seg
+            cost = (x_coeffs'*Q*x_coeffs + y_coeffs'*Q*y_coeffs + z_coeffs'*Q*z_coeffs + 
+                p_coeffs'*Q*p_coeffs + times[end]*kT)[1];
+            #Return the poly_seg type
+            return poly_segment(x_coeffs,y_coeffs, z_coeffs, p_coeffs, times[end], cost, cells, init_config, final_config);
+        end
+    end
+    
+    
+    
+end
+
