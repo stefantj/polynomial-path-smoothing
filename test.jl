@@ -52,19 +52,33 @@ end
 function check_poly_segment(poly::poly_segment)
     # Form a grid which shows the cells we check:
     N = round(Int64, ceil(get_grid_extent()/get_grid_resolution())); # Number of points in a dimension
-    check_grid = zeros(N,N,N); # 0 means not checked.
+    xy_check_grid = zeros(N,N); # 0 means not checked.
+    xz_check_grid = zeros(N,N); # 0 means not checked.
+    yz_check_grid = zeros(N,N); # 0 means not checked.
+
+    println("Cells: ", poly.cells);
 
     for cell in poly.cells
         # Convert to subindices:
         subs = ind2sub((N,N,N), cell);
         # Indicate that we check:
-        check_grid[subs[1],subs[2],subs[3]] += 1;
+        xy_check_grid[subs[1],subs[2]] += 1;
+        xz_check_grid[subs[1],subs[3]] += 1;
+        yz_check_grid[subs[2],subs[3]] += 1;
     end
 
     # plot the grid (floor level slice)
-    figure(1,figsize=(6,6)); clf(); 
     width = get_grid_extent();
-    imshow(check_grid[1,:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    figure(1,figsize=(6,6)); clf(); 
+    subplot(2,2,1);
+    imshow(xy_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    title("XY plane");
+    subplot(2,2,2);
+    imshow(yz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    title("YZ plane");
+    subplot(2,2,3);
+    imshow(xz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    title("XZ plane");
 
     # Plot the polynomial:
     num_tsteps=100;

@@ -37,6 +37,7 @@ type Point
    z::Float64
    p::Float64
 end# Used to store the optimal polynomial that connects two points.
+
 type poly_segment
 # Coefficients of the polynomial
    x_coeffs::Vector{Float64}
@@ -997,12 +998,12 @@ function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::
     #Loop for 2 or 3 dimensions if dim >3
     for looper = 1:dim
         #Create previous point vector
-        pts[looper] = evaluate_poly(coeffMat[looper,:],0,t);
+        pts[looper] = evaluate_poly(vec(coeffMat[looper,:]),0,t);
         #Create a variable to change temporarily
         t_new = t;
         counter = 0;
         #Calculate the time at which the change in distance is more than our distance to travel
-        while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < dist_to_travel[looper] && counter < 1000)
+        while(abs(pts[looper] - evaluate_poly(vec(coeffMat[looper,:]),0,t_new)) < dist_to_travel[looper] && counter < 1000)
             #If we haven't gotten higher than what we want to travel increment the time
             t_new += timeStep;
             #println(t_new)
@@ -1037,7 +1038,7 @@ function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::
         end
         #Find the x,y,z of the current time
         for looper = 1:dim
-            pts[looper] = evaluate_poly(coeffMat[looper, :], 0, t);
+            pts[looper] = evaluate_poly(vec(coeffMat[looper, :]), 0, t);
         end
         #Find occupancy ID at current point by adding to a vector
         occupancy_vec = [occupancy_vec; occupancy_get_id(pts[1], pts[2], pts[3])];
@@ -1052,7 +1053,7 @@ function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::
                 t_new = t;
                 counter = 0;
                 #Calculate the time at which the change in distance is more than our distance to travel
-                while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < dist_to_travel[looper] && counter < 1000)
+                while(abs(pts[looper] - evaluate_poly(vec(coeffMat[looper,:]),0,t_new)) < dist_to_travel[looper] && counter < 1000)
                     #If we haven't gotten higher than what we want to travel increment the time
                     t_new += timeStep;
                     counter += 1;
@@ -1201,6 +1202,8 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
     #Loop until there gradient descent has optimized
     unoptimized = true;
     while(unoptimized)
+        unoptimized=false;
+        println("times: $times");
         #Create A matrix again
         A = zeros(tot_degree, tot_degree)
         for k=1:tot_degree
