@@ -353,6 +353,9 @@ function test_tester()
     polyseg = connect_points([Point(rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1);Point((rand()-0.5)*vel_lim,(rand()-0.5)*vel_lim,(rand()-0.5)*vel_lim,(rand()-0.5)*vel_lim);Point((rand()-1)*accel_lim,(rand()-1)*accel_lim,(rand()-1)*accel_lim,(rand()-1)*accel_lim)], 
         [Point(rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1);Point((rand()-0.5)*vel_lim,(rand()-0.5)*vel_lim,(rand()-0.5)*vel_lim,(rand()-0.5)*vel_lim);Point((rand()-1)*accel_lim,(rand()-1)*accel_lim,(rand()-1)*accel_lim,(rand()-1)*accel_lim)], q_coeff, 5000.0, 100);
 
+#    polyseg = connect_points([Point(0.0,0.0,0.0,0.0);Point(0.0,0.0,0.0,0.0);Point(0.0,0.0,0.0,0.0)], 
+ #       [Point(5.0,5.0,5.0,0.0);Point(0.0,0.0,0.0,0.0);Point(0.0,0.0,0.0,0.0)], q_coeff, 5000.0, 100);
+    
     #polyseg = connect_points([Point(rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1);Point(rand()*vel_lim,rand()*vel_lim,rand()*vel_lim,rand()*vel_lim);Point(rand()*accel_lim,rand()*accel_lim,rand()*accel_lim,rand()*accel_lim)], 
         #[Point(rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1,rand()*pt_lim+1);Point(rand()*vel_lim,rand()*vel_lim,rand()*vel_lim,rand()*vel_lim);Point(rand()*accel_lim,rand()*accel_lim,rand()*accel_lim,rand()*accel_lim)], q_coeff);
     #polyseg.cells = collect(1:50:2000);

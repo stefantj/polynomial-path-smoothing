@@ -942,14 +942,14 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
     #Note what times and positions did the path become infeasible
 end
 
-
-#Funtion occupancyCellChecker gets a path and finds the unique cell IDs in the occupancy grid that the path goes through
+#Funtion occupancyCellChecker gets a path and finds the unique cell IDs in the occupancy grid that the path goes through.
 #Assumptions
 # An occupancy function exists that is called as follows ID = occupancy_get_id(x,y,z)
 # Path starts at zero
 # Solution has coefficient vectors of the same length
 # The grid is [0, get_grid_extent] x [0, get_grid_extent]
 # The dimension must be between 1 and 3 inclusive
+# Cutting corners okay sometimes
 #Inputs/Needed Variables
 # solution - an object containing points, and times related to path solution
 # grid_resx - the resolution of the grid in the x direction
@@ -1103,16 +1103,11 @@ end
 
 
 
-
-
-
-
-
-
 #Function connect_points connects two points with a minimum cost polynomial based on initial and final configurations.
 # At the moment there is only an optimizable variable in the polynomial's final jerk derivative. Returns a poly_segment.
 #Assumptions
 # The order of the constraints is defined by the location in the vectors
+# Assumed continuity order for now
 #Inputs
 # init_config - the initial position (x, y, z, and yaw), velocity, and acceleration
 # final_config - the final position (x, y, z, and yaw), velocity, and acceleration
@@ -1124,15 +1119,15 @@ end
 function connect_points(init_config::Vector{Point}, final_config::Vector{Point}, Q_coeffs::Vector{Float64}, timeCost::Float64, timeBeyondBad::Int64)
     #########################Read in the constraints (Improve later)#####################################
     cont_order = 3;
-    # Random points
+    #Put the two points into their respective vectors with the initial first and final last
     xpts = [init_config[1].x; final_config[1].x];
     ypts = [init_config[1].y; final_config[1].y];
     zpts = [init_config[1].z; final_config[1].z];
     ppts = [init_config[1].p; final_config[1].p];
 
-    #Create a num_points varialbe
+    #Create a num_points variable (it should be 2)
     num_points = length(xpts);
-    num_pts = num_points;
+    #num_pts = num_points;
     # Initial derivative constraints: 
     #          vel acc
     bx_init = [init_config[2].x; init_config[3].x];
