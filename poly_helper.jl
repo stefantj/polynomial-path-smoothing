@@ -943,14 +943,13 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
 end
 
 
-
-
-
 #Funtion occupancyCellChecker gets a path and finds the unique cell IDs in the occupancy grid that the path goes through
 #Assumptions
 # An occupancy function exists that is called as follows ID = occupancy_get_id(x,y,z)
 # Path starts at zero
 # Solution has coefficient vectors of the same length
+# The grid is [0, get_grid_extent] x [0, get_grid_extent]
+# The dimension must be between 1 and 3 inclusive
 #Inputs/Needed Variables
 # solution - an object containing points, and times related to path solution
 # grid_resx - the resolution of the grid in the x direction
@@ -961,19 +960,23 @@ end
 # aggressParam - a parameter of how aggressive to check a path (0,infty), Closer to 0 means check every point on the path, Closer to infinity => check no points
 #Outputs
 # occupancy_vec - a vector of the occupancy IDs that the polynomial is characterized by
+# outOfBounds - a boolean that is true if the polynomial goes outside of the grid
 function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::Float64, grid_resz::Float64, dim::Int64, aggressParam::Float64, timeStep::Float64)
     #Check if the dimension is reasonable otherwise print error and exit;
     if(dim < 1 || dim > 3)
         println("Invalid dimension entered")
         return -1;
     end
+    
+    #Start outOfBounds as false
+    outOfBounds = false;
 
     #Read in the coefficients into a matrix
     coeffMat = [solution.x_coeffs'; solution.y_coeffs'; solution.z_coeffs'];
     #Create a holder for derivatives, delta_t's, and pts when we get there in the for loop
     derivMat = zeros(dim);
     delta_t = zeros(dim);
-    pts = zeros(dim);
+    pts = zeros(3); #Three is used here since if dim is something other than 3 at this point the values are set to zero
     #prevPt = zeros(dim);
     occupancy_vec = zeros(Int64, 0,1);
     
@@ -998,6 +1001,10 @@ function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::
     for looper = 1:dim
         #Create previous point vector
         pts[looper] = evaluate_poly(coeffMat[looper,:],0,t);
+        #Check if in bounds
+        if(pts[looper] < 0 || pts[looper] > get_grid_extent())
+            outOfBounds = true;
+        end
         #Create a variable to change temporarily
         t_new = t;
         counter = 0;
@@ -1038,6 +1045,10 @@ function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::
         #Find the x,y,z of the current time
         for looper = 1:dim
             pts[looper] = evaluate_poly(coeffMat[looper, :], 0, t);
+            #Check if in bounds
+            if(pts[looper] < 0 || pts[looper] > get_grid_extent())
+                outOfBounds = true;
+            end
         end
         #Find occupancy ID at current point by adding to a vector
         occupancy_vec = [occupancy_vec; occupancy_get_id(pts[1], pts[2], pts[3])];
@@ -1072,12 +1083,19 @@ function occupancyCellChecker(solution::PolySol, grid_resx::Float64, grid_resy::
     end
 
         
-    #Check the final point just in case
-    occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
-        evaluate_poly(coeffMat[2,:],0,timeFin),evaluate_poly(coeffMat[3,:],0,timeFin))];
+    #Check the final point just in case based on passed dimension
+    if(dim == 3)
+        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
+            evaluate_poly(coeffMat[2,:],0,timeFin),evaluate_poly(coeffMat[3,:],0,timeFin))];
+    elseif(dim == 2)
+        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
+            evaluate_poly(coeffMat[2,:],0,timeFin),0)];
+    else
+        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),0,0)];
+    end
     
     #Return the vector of unique occupancy grids
-    return unique(occupancy_vec);
+    return unique(occupancy_vec), outOfBounds;
 end
 
 
@@ -1091,17 +1109,19 @@ end
 
 
 
-
-
-#Function connect_points connects two points with a minimum cost polynomial. Returns a poly_segment.
+#Function connect_points connects two points with a minimum cost polynomial based on initial and final configurations.
+# At the moment there is only an optimizable variable in the polynomial's final jerk derivative. Returns a poly_segment.
 #Assumptions
-# The order of the constraints is defined by the size of the vectors
+# The order of the constraints is defined by the location in the vectors
 #Inputs
 # init_config - the initial position (x, y, z, and yaw), velocity, and acceleration
 # final_config - the final position (x, y, z, and yaw), velocity, and acceleration
+# Q_coeffs - the vector of cost weights for various derivatives of the polynomial should be the same size as polynomial's degree
+# timeCost - the cost for the time in a segment
+# timeBeyondBad - the time after which a path is to be considered to cost Inf
 #Outputs
 # polySeg - a poly segment struct
-function connect_points(init_config::Vector{Point}, final_config::Vector{Point}, Q_coeffs)
+function connect_points(init_config::Vector{Point}, final_config::Vector{Point}, Q_coeffs::Vector{Float64}, timeCost::Float64, timeBeyondBad::Int64)
     #########################Read in the constraints (Improve later)#####################################
     cont_order = 3;
     # Random points
@@ -1142,7 +1162,7 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
     # Q coeffs: weight which derivatives you care about:
     q_coeff = Q_coeffs;
     # Total time penalty
-    kT = 50000; 
+    kT = timeCost; 
     prob = PolyProblem(B_x,B_y,B_z,B_p,round(Int64,B_orders),round(Int64,B_time_inds),q_coeff,kT);
     ##################################################################################################
     #Solve first with a time of 1 second
@@ -1171,7 +1191,7 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
         # Form A matrix:
         num_unique = tot_degree;
 
-        figure(5); spy(A);
+        #figure(5); spy(A);
     #    Ainv = inv(A);
         AiC = A_inv; # This is about 10% time, and can be fixed by just selecting rows/columns
         # Form Q matrix:
@@ -1212,23 +1232,29 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
         errorTimes = verifyActuateablePath(sol, 2.0, 0.65, 10.0, 100000000000000.0);
 
         #Redo the calculation with a larger time if there are errors
-        if(!isempty(errorTimes) && counter < 100)
+        if(!isempty(errorTimes) && counter < timeBeyondBad)
             #Increment by 1 second every time
             counter += 1;
             times = float(collect(0:num_points-1)) * counter;
-            println(times);
+            #println(times);
         else
             errorExist = false;
-            if(counter > 100)
-                println("path not feasible after 100s time")
-            end
-            println("past verify")
-            #Find the cells of that the polynomial passes through
-            cells = occupancyCellChecker(sol, get_grid_resolution(), get_grid_resolution(), get_grid_resolution(), 3, 0.8, 0.01);
-            println("past occupancy");
             #Record the final cost of the poly seg
             cost = (x_coeffs'*Q*x_coeffs + y_coeffs'*Q*y_coeffs + z_coeffs'*Q*z_coeffs + 
                 p_coeffs'*Q*p_coeffs + times[end]*kT)[1];
+            if(counter >= 100)
+                println("path not feasible after ", timeBeyondBad, "s time")
+                cost = Inf;
+            end
+            #println("past verify")
+            #Find the cells of that the polynomial passes through
+            cells, outOfBounds = occupancyCellChecker(sol, get_grid_resolution(), get_grid_resolution(), get_grid_resolution(), 3, 0.8, 0.001);
+            #Check if out of bounds and make cost inf if it is true
+            if(outOfBounds)
+                println("path went out of bounds")
+                cost = Inf;
+            end
+            #println("past occupancy");
             #Return the poly_seg type
             return poly_segment(x_coeffs,y_coeffs, z_coeffs, p_coeffs, times[end], cost, cells, init_config, final_config);
         end
