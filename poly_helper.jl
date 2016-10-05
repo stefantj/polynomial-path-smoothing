@@ -641,7 +641,7 @@ function poly_smoothing(prob::PolyProblem, param::PolyParams)
     num_unique = size(C,2);
     t_Abig = toq();
 
-    figure(5); spy(A);
+#    figure(5); spy(A);
 
     tic();
 #    Ainv = inv(A);
@@ -849,7 +849,6 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
     yddddprob = zeros(0,1);
     ######################Simple Method#####################################
     #Create a figure for debugging plots
-    figure();
     #For each segment
     for seg = 1:num_poly
         #Create indexing range for the coefficients
@@ -1169,7 +1168,7 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
     # Form A matrix:
     num_unique = tot_degree;
 
-    figure(5); spy(A);
+#    figure(5); spy(A);
 #    Ainv = inv(A);
     AiC = A_inv; # This is about 10% time, and can be fixed by just selecting rows/columns
     # Form Q matrix:
@@ -1279,7 +1278,7 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
             # Form A matrix:
             num_unique = tot_degree;
 
-            figure(5); spy(A);
+#            figure(5); spy(A);
         #    Ainv = inv(A);
             AiC = A_inv; # This is about 10% time, and can be fixed by just selecting rows/columns
             # Form Q matrix:
