@@ -1141,6 +1141,7 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
     kT = 50000; 
     prob = PolyProblem(B_x,B_y,B_z,B_p,round(Int64,B_orders),round(Int64,B_time_inds),q_coeff,kT);
     ##################################################################################################
+    #Solve first with a time of 1 second
     times = float(collect(0:num_points-1));
 
     #Create the polyparams object   
@@ -1149,31 +1150,71 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
     num_fixed = size(prob.B_x,1);
     tot_degree = length(B_orders);
     
-    #Start a while loop to loop until the path is feasible
-    errorExist = true;
-    counter = 1;
-    while(errorExist)
-        #Create A matrix
+    #Create precision and cost variables
+    precision = 1
+    cost1 = 0;
+    cost2 = 0;
+    #Do the optimization once
+    #Create A matrix
+    A = zeros(tot_degree, tot_degree)
+    for k=1:tot_degree
+        A[k,:] = constr_order(B_orders[k], times[B_time_inds[k]],tot_degree);
+    end
+
+    #Set things equal
+    A_inv = inv(A);
+########################33Here is where the gradient loop will start:##############################
+##################################################################################################
+    # Form A matrix:
+    num_unique = tot_degree;
+
+    figure(5); spy(A);
+#    Ainv = inv(A);
+    AiC = A_inv; # This is about 10% time, and can be fixed by just selecting rows/columns
+    # Form Q matrix:
+    Q = form_Q(q_coeff, times[end]-times[1]); 
+    # Compute free variables:
+    R = AiC'*(Q*AiC);
+# should be a householder multiply here
+    opt_mat = - ( R[num_fixed+1:num_unique, num_fixed+1:num_unique])\R[1:num_fixed, num_fixed+1:num_unique]';
+
+    bx = [prob.B_x; opt_mat*prob.B_x];
+    by = [prob.B_y; opt_mat*prob.B_y];
+    bz = [prob.B_z; opt_mat*prob.B_z];
+    bp = [prob.B_p; opt_mat*prob.B_p];
+
+    x_coeffs = AiC*bx;
+    y_coeffs = AiC*by;
+    z_coeffs = AiC*bz;
+    p_coeffs = AiC*bp;
+    #Put into a PolySol object
+    sol = PolySol(prob, param, num_points-1, times, x_coeffs, y_coeffs, z_coeffs, p_coeffs); 
+
+    #Calculate the new cost
+    cost1 = (x_coeffs'*Q*x_coeffs + y_coeffs'*Q*y_coeffs + z_coeffs'*Q*z_coeffs + 
+            p_coeffs'*Q*p_coeffs + times[end]*kT)[1];
+    
+    #Create an initial perturbation in t
+    perturb = 0.1;#ten percent
+    times *= perturb;
+    
+    #Loop until there gradient descent has optimized
+    unoptimized = true;
+    while(unoptimized)
+        #Create A matrix again
         A = zeros(tot_degree, tot_degree)
         for k=1:tot_degree
             A[k,:] = constr_order(B_orders[k], times[B_time_inds[k]],tot_degree);
         end
 
-        #Set things equal
+        #Find the inverse and name it correctly
         A_inv = inv(A);
-    ########################33Here is where the gradient loop will start:##############################
-    ##################################################################################################
-        # Form A matrix:
-        num_unique = tot_degree;
-
-        figure(5); spy(A);
-    #    Ainv = inv(A);
         AiC = A_inv; # This is about 10% time, and can be fixed by just selecting rows/columns
         # Form Q matrix:
         Q = form_Q(q_coeff, times[end]-times[1]); 
         # Compute free variables:
         R = AiC'*(Q*AiC);
-    # should be a householder multiply here
+        # should be a householder multiply here
         opt_mat = - ( R[num_fixed+1:num_unique, num_fixed+1:num_unique])\R[1:num_fixed, num_fixed+1:num_unique]';
 
         bx = [prob.B_x; opt_mat*prob.B_x];
@@ -1188,45 +1229,108 @@ function connect_points(init_config::Vector{Point}, final_config::Vector{Point},
         #Put into a PolySol object
         sol = PolySol(prob, param, num_points-1, times, x_coeffs, y_coeffs, z_coeffs, p_coeffs); 
 
-
+        #Calculate the new cost and record the old cost
+        cost2 = cost1;
+        cost1 = (x_coeffs'*Q*x_coeffs + y_coeffs'*Q*y_coeffs + z_coeffs'*Q*z_coeffs + 
+                p_coeffs'*Q*p_coeffs + times[end]*kT)[1];
+        
+        #check the difference 
+        if(abs(cost1-cost2)<precision)
+            unoptimized = false;
+        elseif((cost1-cost2) > 0)
+            #if cost has increase go backwards and shorten the perturbation
+            times = times/perturb * (1+perturb);
+            perturb = perturb/2;
+        else
+            #otherwise continue to go down
+            times = times*perturb;
+        end
+            
+    end
         #Return the poly_seg type
         #return poly_segment(x_coeffs,y_coeffs, z_coeffs, p_coeffs, times[end], cost, cells, init_config, final_config)
     ## This is where the gradient should be updated and times recomputed
 
     ## Here is where the gradient loop stops
+    #Now check if feasible according to desired
+    #Max Velocity and Acceleration taken from what is used in pikachu launch files
+    #Max Jerk guessed
+    errorTimes = verifyActuateablePath(sol, 2.0, 0.65, 10.0, 100000000000000.0);
+    #Redo the calculation with a larger time if there are errors
+    if(!isempty(errorTimes))
+        #Start a while loop to loop until the path is optimized
+        errorExist = true;
+        counter = 1;
+        times[end] += 1;
+        while(errorExist)
+            #Create A matrix
+            A = zeros(tot_degree, tot_degree)
+            for k=1:tot_degree
+                A[k,:] = constr_order(B_orders[k], times[B_time_inds[k]],tot_degree);
+            end
 
+            #Set things equal
+            A_inv = inv(A);
+        ########################33Here is where the gradient loop will start:##############################
+        ##################################################################################################
+            # Form A matrix:
+            num_unique = tot_degree;
 
+            figure(5); spy(A);
+        #    Ainv = inv(A);
+            AiC = A_inv; # This is about 10% time, and can be fixed by just selecting rows/columns
+            # Form Q matrix:
+            Q = form_Q(q_coeff, times[end]-times[1]); 
+            # Compute free variables:
+            R = AiC'*(Q*AiC);
+        # should be a householder multiply here
+            opt_mat = - ( R[num_fixed+1:num_unique, num_fixed+1:num_unique])\R[1:num_fixed, num_fixed+1:num_unique]';
 
-        #Create a time vector
-        #time = collect(linspace(0,times[end]));
-        #figure();
-        #plot(evaluate_poly(x_coeffs,0,time),evaluate_poly(y_coeffs,0,time))
+            bx = [prob.B_x; opt_mat*prob.B_x];
+            by = [prob.B_y; opt_mat*prob.B_y];
+            bz = [prob.B_z; opt_mat*prob.B_z];
+            bp = [prob.B_p; opt_mat*prob.B_p];
 
-        #Max Velocity and Acceleration taken from what is used in pikachu launch files
-        #Max Jerk guessed
-        errorTimes = verifyActuateablePath(sol, 2.0, 0.65, 10.0, 100000000000000.0);
+            x_coeffs = AiC*bx;
+            y_coeffs = AiC*by;
+            z_coeffs = AiC*bz;
+            p_coeffs = AiC*bp;
+            #Put into a PolySol object
+            sol = PolySol(prob, param, num_points-1, times, x_coeffs, y_coeffs, z_coeffs, p_coeffs); 
 
-        #Redo the calculation with a larger time if there are errors
-        if(!isempty(errorTimes) && counter < 100)
-            #Increment by 1 second every time
-            counter += 1;
-            times = float(collect(0:num_points-1)) * counter;
-            println(times);
-        else
-            errorExist = false;
-            println("past verify")
-            #Find the cells of that the polynomial passes through
-            cells = occupancyCellChecker(sol, get_grid_resolution(), get_grid_resolution(), get_grid_resolution(), 3, 0.8);
-            println("past occupancy");
-            #Record the final cost of the poly seg
-            cost = (x_coeffs'*Q*x_coeffs + y_coeffs'*Q*y_coeffs + z_coeffs'*Q*z_coeffs + 
-                p_coeffs'*Q*p_coeffs + times[end]*kT)[1];
-            #Return the poly_seg type
-            return poly_segment(x_coeffs,y_coeffs, z_coeffs, p_coeffs, times[end], cost, cells, init_config, final_config);
+            #Max Velocity and Acceleration taken from what is used in pikachu launch files
+            #Max Jerk guessed
+            errorTimes = verifyActuateablePath(sol, 2.0, 0.65, 10.0, 100000000000000.0);
+
+            #Redo the calculation with a larger time if there are errors
+            if(!isempty(errorTimes) && counter < 100)
+                #Increment by 1 second every time
+                counter += 1;
+                times[end] += 1;
+                println(times);
+            else
+                errorExist = false;
+                println("past verify")
+                #Find the cells of that the polynomial passes through
+                cells = occupancyCellChecker(sol, get_grid_resolution(), get_grid_resolution(), get_grid_resolution(), 3, 0.8);
+                println("past occupancy");
+                #Record the final cost of the poly seg
+                cost = (x_coeffs'*Q*x_coeffs + y_coeffs'*Q*y_coeffs + z_coeffs'*Q*z_coeffs + 
+                    p_coeffs'*Q*p_coeffs + times[end]*kT)[1];
+                #Return the poly_seg type
+                return poly_segment(x_coeffs,y_coeffs, z_coeffs, p_coeffs, times[end], cost, cells, init_config, final_config);
+            end
         end
-    end
-    
+    else
+        println("past verify")
+        #Find the cells of that the polynomial passes through
+        cells = occupancyCellChecker(sol, get_grid_resolution(), get_grid_resolution(), get_grid_resolution(), 3, 0.8);
+        println("past occupancy");
+        #Record the final cost of the poly seg
+        cost = (cost1);
+        #Return the poly_seg type
+        return poly_segment(x_coeffs,y_coeffs, z_coeffs, p_coeffs, times[end], cost, cells, init_config, final_config);
+    end   
     
     
 end
-
