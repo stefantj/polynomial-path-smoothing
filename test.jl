@@ -48,6 +48,54 @@ function occupancy_get_id(x,y,z)
     return sub2ind((n,n,n),round(Int64,x/res)+1,round(Int64,y/res)+1,round(Int64,z/res)+1)
 end
 
+function test_on_circle()
+
+    # put in points as a circle:
+    times = collect(0:0.01:2pi)
+    xs = 3*sin(times)+6;
+    ys = cos(times)+5;
+    zs = 2*sin(times)+3;
+    tind = 0;
+   cells = Int64[];
+    for t in times
+        tind+=1;
+        push!(cells, occupancy_get_id(xs[tind],ys[tind],zs[tind]))
+    end 
+
+    N = round(Int64, ceil(get_grid_extent()/get_grid_resolution())); # Number of points in a dimension
+    xy_check_grid = zeros(N,N); # 0 means not checked.
+    xz_check_grid = zeros(N,N); # 0 means not checked.
+    yz_check_grid = zeros(N,N); # 0 means not checked.
+
+
+    for cell in cells
+        # Convert to subindices:  
+        subs = ind2sub((N,N,N), cell);
+        # Indicate that we check:
+        xy_check_grid[subs[1],subs[2]] += 1;
+        xz_check_grid[subs[1],subs[3]] += 1;
+        yz_check_grid[subs[2],subs[3]] += 1;
+    end 
+
+    num_tsteps=100;                                                         
+
+    width = get_grid_extent();
+    delta = get_grid_resolution()/2;
+    figure(1,figsize=(6,6)); clf();    
+    subplot(2,2,1);
+    imshow(xy_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    plot(xs+delta,width-ys-delta,color=:red);    
+    title("XY plane");
+    subplot(2,2,2);
+    imshow(yz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    plot(ys+delta,width-zs-delta,color=:red)
+    title("YZ plane");
+    subplot(2,2,3);
+    imshow(xz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    plot(xs+delta,width-zs-delta,color=:red)
+    title("XZ plane");
+end
+
 # Now we test:
 function check_poly_segment(poly::poly_segment)
     # Form a grid which shows the cells we check:
@@ -55,8 +103,6 @@ function check_poly_segment(poly::poly_segment)
     xy_check_grid = zeros(N,N); # 0 means not checked.
     xz_check_grid = zeros(N,N); # 0 means not checked.
     yz_check_grid = zeros(N,N); # 0 means not checked.
-
-    println("Cells: ", poly.cells);
 
     for cell in poly.cells
         # Convert to subindices:
@@ -67,20 +113,6 @@ function check_poly_segment(poly::poly_segment)
         yz_check_grid[subs[2],subs[3]] += 1;
     end
 
-    # plot the grid (floor level slice)
-    width = get_grid_extent();
-    figure(1,figsize=(6,6)); clf(); 
-    subplot(2,2,1);
-    imshow(xy_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
-    title("XY plane");
-    subplot(2,2,2);
-    imshow(yz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
-    title("YZ plane");
-    subplot(2,2,3);
-    imshow(xz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
-    title("XZ plane");
-
-    # Plot the polynomial:
     num_tsteps=100;
     times = linspace(0,poly.t,num_tsteps);
     xs = zeros(num_tsteps)    
@@ -88,12 +120,29 @@ function check_poly_segment(poly::poly_segment)
     zs = zeros(num_tsteps);
 
     order = size(poly.x_coeffs,1);
-println("Order is $order");
     for ord = 1:order
         xs += poly.x_coeffs[ord].*(times.^(ord-1))
         ys += poly.y_coeffs[ord].*(times.^(ord-1))
         zs += poly.z_coeffs[ord].*(times.^(ord-1))
     end
+
+    # plot the grid (floor level slice)
+    width = get_grid_extent();
+    delta = get_grid_resolution()/2;
+    figure(1,figsize=(6,6)); clf();    
+    subplot(2,2,1);
+    imshow(xy_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    plot(xs+delta,width-ys-delta,color=:red);    
+    title("XY plane");
+    subplot(2,2,2);
+    imshow(yz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    plot(ys+delta,width-zs-delta,color=:red)
+    title("YZ plane");
+    subplot(2,2,3);
+    imshow(xz_check_grid[:,:]', cmap="gray", interpolation="none",extent=[0,width,0,width]);
+    plot(xs+delta,width-zs-delta,color=:red)
+    title("XZ plane");
+    # Plot the polynomial:
     #plot(xs,ys,color=:red, linewidth=2);
 
     # Try 3D plot
@@ -105,13 +154,77 @@ println("Order is $order");
 
 
     # Should add more checks such as confirming velocity
-    #Print the velocities
+    #Check if all configurations are within error between given and actual
+    precision = 0.00000000001;
+    println("Are the initial configurations within precision")
+    println(abs(poly.init_config[1].x - evaluate_poly(poly.x_coeffs, 0, 0)) < precision, ", ", 
+    abs(poly.init_config[1].y-evaluate_poly(poly.y_coeffs, 0, 0)) < precision  , ", ",
+    abs(poly.init_config[1].z-evaluate_poly(poly.z_coeffs, 0, 0)) < precision, ", ",
+    abs(poly.init_config[1].p-evaluate_poly(poly.p_coeffs, 0, 0)) < precision)
+    println(abs(poly.init_config[2].x - evaluate_poly(poly.x_coeffs, 1, 0)) < precision, ", ", 
+    abs(poly.init_config[2].y-evaluate_poly(poly.y_coeffs, 1, 0)) < precision  , ", ",
+    abs(poly.init_config[2].z-evaluate_poly(poly.z_coeffs, 1, 0)) < precision, ", ",
+    abs(poly.init_config[2].p-evaluate_poly(poly.p_coeffs, 1, 0)) < precision)
+    println(abs(poly.init_config[3].x - evaluate_poly(poly.x_coeffs, 2, 0)) < precision, ", ", 
+    abs(poly.init_config[3].y-evaluate_poly(poly.y_coeffs, 2, 0)) < precision  , ", ",
+    abs(poly.init_config[3].z-evaluate_poly(poly.z_coeffs, 2, 0)) < precision, ", ",
+    abs(poly.init_config[3].p-evaluate_poly(poly.p_coeffs, 2, 0)) < precision)
+    println("Are the final configurations within precision")
+    println(abs(poly.final_config[1].x - evaluate_poly(poly.x_coeffs, 0, poly.t)) < precision, ", ", 
+    abs(poly.final_config[1].y-evaluate_poly(poly.y_coeffs, 0, poly.t)) < precision  , ", ",
+    abs(poly.final_config[1].z-evaluate_poly(poly.z_coeffs, 0, poly.t)) < precision, ", ",
+    abs(poly.final_config[1].p-evaluate_poly(poly.p_coeffs, 0, poly.t)) < precision)
+    println(abs(poly.final_config[2].x - evaluate_poly(poly.x_coeffs, 1, poly.t)) < precision, ", ", 
+    abs(poly.final_config[2].y-evaluate_poly(poly.y_coeffs, 1, poly.t)) < precision  , ", ",
+    abs(poly.final_config[2].z-evaluate_poly(poly.z_coeffs, 1, poly.t)) < precision, ", ",
+    abs(poly.final_config[2].p-evaluate_poly(poly.p_coeffs, 1, poly.t)) < precision)
+    println(abs(poly.final_config[3].x - evaluate_poly(poly.x_coeffs, 2, poly.t)) < precision, ", ", 
+    abs(poly.final_config[3].y-evaluate_poly(poly.y_coeffs, 2, poly.t)) < precision  , ", ",
+    abs(poly.final_config[3].z-evaluate_poly(poly.z_coeffs, 2, poly.t)) < precision, ", ",
+    abs(poly.final_config[3].p-evaluate_poly(poly.p_coeffs, 2, poly.t)) < precision)
+    #println("The given initial points")
+    #println(poly.init_config[1].x, ", ", poly.init_config[1].y, ", ", poly.init_config[1].z, ", ", poly.init_config[1].p)
+    #Print the configurations and compare to what is calculated within error
+    #println("The initial points of the polynomial")
+    #println(evaluate_poly(poly.x_coeffs, 0, 0), ", ", evaluate_poly(poly.y_coeffs, 0, 0), ", ", evaluate_poly(poly.z_coeffs, 0, 0), ", ", evaluate_poly(poly.p_coeffs, 0, 0))
+    #initial velocities
+    #println("The given initial velocities")
+    #println(poly.init_config[2].x, ", ", poly.init_config[2].y, ", ", poly.init_config[2].z, ", ", poly.init_config[2].p)
+    #Print the configurations and compare to what is calculated within error
+    #println("The initial velocities of the polynomial")
+    #println(evaluate_poly(poly.x_coeffs, 1, 0), ", ", evaluate_poly(poly.y_coeffs, 1, 0), ", ", evaluate_poly(poly.z_coeffs, 1, 0), ", ", evaluate_poly(poly.p_coeffs, 1, 0))
+    #initial accelerations
+    #println("The given initial accelerations")
+    #println(poly.init_config[3].x, ", ", poly.init_config[3].y, ", ", poly.init_config[3].z, ", ", poly.init_config[3].p)
+    #Print the configurations and compare to what is calculated within error
+    #println("The initial accelerations of the polynomial")
+    #println(evaluate_poly(poly.x_coeffs, 2, 0), ", ", evaluate_poly(poly.y_coeffs, 2, 0), ", ", evaluate_poly(poly.z_coeffs, 2, 0), ", ", evaluate_poly(poly.p_coeffs, 2, 0))
+    
+    
+    ###########Print the final configuarations and how they compare to what the polynomial gives#################
+    #println("The given final points")
+    #println(poly.final_config[1].x, ", ", poly.final_config[1].y, ", ", poly.final_config[1].z, ", ", poly.final_config[1].p)
+    #Print the configurations and compare to what is calculated within error
+    #println("The final points of the polynomial")
+    #println(evaluate_poly(poly.x_coeffs, 0, poly.t), ", ", evaluate_poly(poly.y_coeffs, 0, poly.t), ", ", evaluate_poly(poly.z_coeffs, 0, poly.t), ", ", evaluate_poly(poly.p_coeffs, 0, poly.t))
+    #initial velocities
+    #println("The given final velocities")
+    #println(poly.final_config[2].x, ", ", poly.final_config[2].y, ", ", poly.final_config[2].z, ", ", poly.final_config[2].p)
+    #Print the configurations and compare to what is calculated within error
+    #println("The final velocities of the polynomial")
+    #println(evaluate_poly(poly.x_coeffs, 1, poly.t), ", ", evaluate_poly(poly.y_coeffs, 1, poly.t), ", ", evaluate_poly(poly.z_coeffs, 1, poly.t), ", ", evaluate_poly(poly.p_coeffs, 1, poly.t))
+    #initial accelerations
+    #println("The given final accelerations")
+    #println(poly.final_config[3].x, ", ", poly.final_config[3].y, ", ", poly.final_config[3].z, ", ", poly.final_config[3].p)
+    #Print the configurations and compare to what is calculated within error
+    #println("The final accelerations of the polynomial")
+    #println(evaluate_poly(poly.x_coeffs, 2, poly.t), ", ", evaluate_poly(poly.y_coeffs, 2, poly.t), ", ", evaluate_poly(poly.z_coeffs, 2, poly.t), ", ", evaluate_poly(poly.p_coeffs, 2, poly.t))
 end
 
 
 function test_tester()
     polyseg = connect_points([Point(0.0,6.0,9.0,1.0);Point(0.0,-0.25,0.0,0.0);Point(0.0,0.0,0.0,0.0)], 
-        [Point(0.0,2.0,5.0,0.0);Point(0.0,0.0,0.25,0.0);Point(0.0,0.0,0.0,0.0)], q_coeff);
+        [Point(5.0,2.0,5.0,0.0);Point(0.0,0.0,0.25,0.0);Point(0.0,0.0,0.0,0.0)], q_coeff);
     #polyseg.cells = collect(1:50:2000);
     println("out of connnect");
     check_poly_segment(polyseg)
