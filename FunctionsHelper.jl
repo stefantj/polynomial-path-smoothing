@@ -79,13 +79,19 @@ end
 # max_accel - the maximum position acceleration that the robot is limited to 
 # max_jerk - the maximum position jerk that the robot is limited to
 # max_motor_rpm - the maximum rpm that a motor can get
+# dim - the dimension to consider movement in
+# degree - the degree of the poly segment
 #Outputs
 # did_pass - a boolean that is true when the path passes
 # timeProbv - a vector of times where motion is infeasible based on velocity
 # timeProbm - a vector of times where motion is infeasible based on velocity
-function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::Float64, max_jerk::Float64, max_motor_rpm::Float64)
+function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::Float64, max_jerk::Float64, max_motor_rpm::Float64, dim::Int64, degree::Int64)
+    #Check if the dimension is reasonable otherwise print error and exit;
+    if(dim < 1 || dim > 3)
+        println("Invalid dimension entered")
+        return -1;
+    end
     #Extract important information from the solution object
-    degree = 2 + 2*(3-1) #create the degree of each polynomial assuming 2 pts for each
     num_poly = solution.num_segs;
     xcoeffs = solution.x_coeffs;
     ycoeffs = solution.y_coeffs;
@@ -175,6 +181,7 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
         #Create the time vector for the polynomials, because of the way the problem is set up
         # every polynomial must be evaluated from 0 to the end of its range and then shifted
         t = collect(linspace(0,time_vec[seg+1]-time_vec[seg],time_res));
+        #println(t)
         #Generate a time vector for plotting and reporting
         timeRep = [timeRep; t+time_vec[seg]]
         #Calculate positions
@@ -203,7 +210,7 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
         #Calculate the snaps
         #Compare against the limits and store time and points
         #Velocity Limits
-        timeProbv = [timeProbv; timeRep[find(total_vel .> max_vel)]];
+        timeProbv = [timeProbv; total_vel[find(total_vel .> max_vel)]];
         xprob = [xprob; evaluate_poly(xcoeffs_s,0,t[find(total_vel .> max_vel)])];
         yprob = [yprob; evaluate_poly(ycoeffs_s,0,t[find(total_vel .> max_vel)])];
         #Acceleration Limits
@@ -218,7 +225,7 @@ function verifyActuateablePath(solution::PolySol, max_vel::Float64, max_accel::F
         #Plot the graphs for debugging
         #figure();
         #Plot Problem points on position graph
-        #plot(t+time_vec[seg],zddd);
+        #plot(t+time_vec[seg],xd);
         #title("Problem")
     end
     #Print debugging information
@@ -433,6 +440,7 @@ function occupancyCellChecker(xcf,ycf,zcf,times, grid_resx::Float64, grid_resy::
                 delta_t[looper] = abs(t_new - t);
             end
         end
+        #print(round(Int64,t*1000), " ")
         #derivMat[deltaIndex] = evaluate_poly(coeffMat[deltaIndex, :], 1, t);
         #Make sure the derivative is not zero
         #if(derivMat[deltaIndex] == 0)
@@ -465,7 +473,7 @@ function occupancy_get_id(x,y,z)
     width = get_grid_extent();
     res   = get_grid_resolution();
     n = round(Int64,ceil(width/res));
-    #println(x,y,z)
+    #print(x," ",y, " ", z)
     return sub2ind((n,n,n),floor(Int64,x/res)+1,floor(Int64,y/res)+1,floor(Int64,z/res)+1)
 end
 
