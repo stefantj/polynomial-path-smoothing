@@ -470,8 +470,8 @@ function occupancy_get_id(x,y,z)
 end
 
 function get_grid_extent()
-    return 50;
+    return 10;
 end
 function get_grid_resolution()
-    return 0.5
+    return 0.1
 end
