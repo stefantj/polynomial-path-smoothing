@@ -632,29 +632,45 @@ end
 #quick and dirty function for initial optimization before cost optimization
 #Set up A matrix so that Ap = d where p is the coefficients of the polynomial and d are the constraints in a vector
 function initialOptimization(tot_degree, orders, times, q_coeff, num_free, endVelWeight, endAccelWeight, endWeight, max_vel_vec,
-    max_accel_vec, final_Posx, final_Posy, final_Posz, x_constr, y_constr, z_constr)
-A = zeros(tot_degree, tot_degree);
-for k=1:tot_degree
-    A[k,:] = constr_order(orders[k], times[timeIndex[k]+1],tot_degree);
-end
-#Calculate A inverse
-A_inv = inv(A);
-# Form Q matrix where cost = p'Qp without the costmap
-Q = zeros(tot_degree, tot_degree)
-Q = form_Q(q_coeff, times[end]-times[1]); 
-#Solve for the optimal ends with no costmap first
-R = A_inv'*(Q*A_inv);
-#short for optimizing matrix
-RppInv = inv(R[(tot_degree-num_free+1):tot_degree, (tot_degree-num_free+1):tot_degree]+[endVelWeight 0 0; 0 endAccelWeight 0;0 0 endWeight])
-opt_mat = -RppInv*R[1:(tot_degree-num_free), 
-    (tot_degree-num_free+1):tot_degree]';
-#Record the optimized value in a variable for later gradient descent; will only work for 1 free variable at the moment
-x_free = opt_mat * (x_constr)+[max_vel_vec[1];max_accel_vec[1];final_Posx];
-y_free = opt_mat * (y_constr)+[max_vel_vec[2];max_accel_vec[2];final_Posy];
-z_free = opt_mat * (z_constr)+[max_vel_vec[3];max_accel_vec[3];final_Posz];
-x_coeffs = A_inv * [x_constr; x_free]#+[final_Pos.x;0;0;0;0;0];
-y_coeffs = A_inv * [y_constr; y_free]#+[final_Pos.y;0;0;0;0;0];
-z_coeffs = A_inv * [z_constr; z_free]#+[final_Pos.z;0;0;0;0;0];
+    max_accel_vec, final_Posx, final_Posy, final_Posz, x_constr, y_constr, z_constr, totVelWeight)
+    A = zeros(tot_degree, tot_degree);
+    for k=1:tot_degree
+        A[k,:] = constr_order(orders[k], times[timeIndex[k]+1],tot_degree);
+    end
+        #Calculate A inverse
+    A_inv = inv(A);
+    #create a velocity matrix
+    V = [0 0 0 0 0 0;
+         0 1 0 0 0 0;
+         0 0 2 0 0 0;
+         0 0 0 3 0 0;
+         0 0 0 0 4 0;
+         0 0 0 0 0 5];
+    #Create a time row vec
+    rowTime = [1 times[end] times[end]^2 times[end]^3 times[end]^4 times[end]^5];
+    #Create a filler for the 
+    AVTTVAmatrix = (rowTime*V*A_inv)'*rowTime*V*A_inv;
+    maxVelholder = sqrt(max_vel_vec[1]^2+ max_vel_vec[2]^2+max_vel_vec[3]^2);
+    AVTTVAmatrixpp = AVTTVAmatrix[(tot_degree-num_free+1):tot_degree, (tot_degree-num_free+1):tot_degree];
+    AVTTVAmatrixfp = AVTTVAmatrix[1:(tot_degree-num_free), (tot_degree-num_free+1):tot_degree];
+
+    # Form Q matrix where cost = p'Qp without the costmap
+    Q = zeros(tot_degree, tot_degree)
+    Q = form_Q(q_coeff, times[end]-times[1]); 
+    #Solve for the optimal ends with no costmap first
+    R = A_inv'*(Q*A_inv);
+    #short for optimizing matrix
+    RppInv = inv(R[(tot_degree-num_free+1):tot_degree, (tot_degree-num_free+1):tot_degree]+[endVelWeight+totVelWeight 0 0; 0 endAccelWeight+totVelWeight 0;0 0 endWeight+totVelWeight]+AVTTVAmatrixpp)
+    opt_mat = -RppInv*R[1:(tot_degree-num_free), 
+        (tot_degree-num_free+1):tot_degree]';
+    #Record the optimized value in a variable for later gradient descent; will only work for 1 free variable at the moment
+    x_free = opt_mat * (x_constr)+[max_vel_vec[1];max_accel_vec[1];final_Posx]+totVelWeight*(maxVelholder*AVTTVAmatrixpp*[1;0;0]-AVTTVAmatrixfp*x_constr);
+    y_free = opt_mat * (y_constr)+[max_vel_vec[2];max_accel_vec[2];final_Posy]+totVelWeight*(maxVelholder*AVTTVAmatrixpp*[1;0;0]-AVTTVAmatrixfp*y_constr);
+    z_free = opt_mat * (z_constr)+[max_vel_vec[3];max_accel_vec[3];final_Posz]+totVelWeight*(maxVelholder*AVTTVAmatrixpp*[1;0;0]-AVTTVAmatrixfp*z_constr);
+        println("xfree: ", x_free, ", yfree: ",y_free, ", zfree", z_free) 
+    x_coeffs = A_inv * [x_constr; x_free]#+[final_Pos.x;0;0;0;0;0];
+    y_coeffs = A_inv * [y_constr; y_free]#+[final_Pos.y;0;0;0;0;0];
+    z_coeffs = A_inv * [z_constr; z_free]#+[final_Pos.z;0;0;0;0;0];
     
     return A_inv, Q, opt_mat, x_free, y_free, z_free, x_coeffs, y_coeffs, z_coeffs;
 end
@@ -665,124 +681,112 @@ end
 ############Crappy function to clean up main code here###############
 #Start the while loop until optimized or over the number of times to iterate
 function crudyGradientDescent2(iterations, perturbStep, x_coeffs, y_coeffs, z_coeffs, times, dim, aggressParam, timeStep, Q,
-    A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2,endWeight,perturbStep3)
+    A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2, velWeightGD,perturbStep3,max_vel)
+    #define timeRes for summing
+    timeRes = 100;
     #start off unoptimized
+    outOfBoundsGD2 = false;
     unOptimized = true;
     count2Iterations = 0;
     tcells = zeros(Int64,0,1);
     cells = zeros(Int64,0,1);
+    #create a time vector from time for summing up costs
+    summingTimes = collect(linspace(times[1],times[end],timeRes) #the one hundred should be a value
     while(unOptimized && count2Iterations  <= iterations)
         #Check the cost of each perturbed poly, if increased, change the perturbation direction, record the rate of change
         x_coeffsP = A_inv * [x_constr; x_free+[0; perturbStep; 0]];
-        cells,outOfBounds = occupancyCellChecker(x_coeffsP, y_coeffs, z_coeffs, times, get_grid_resolution(),
+        cells,outOfBoundsGD2 = occupancyCellChecker(x_coeffsP, y_coeffs, z_coeffs, times, get_grid_resolution(),
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of x bounds")
             break;
         end
-        costx = ((x_coeffsP)' * Q * (x_coeffsP) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costx = ((x_coeffsP)' * Q * (x_coeffsP) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +obstacleWeight*sum(costmap[cells]) +velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangex = (costx-cost1)/perturbStep;
         y_coeffsP = A_inv * [y_constr; y_free+[0;perturbStep; 0]];
-        cells, outOfBounds = occupancyCellChecker(x_coeffs, y_coeffsP, z_coeffs, times, get_grid_resolution(), 
+        cells, outOfBoundsGD2 = occupancyCellChecker(x_coeffs, y_coeffsP, z_coeffs, times, get_grid_resolution(), 
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of ybounds")
             break;
         end
-        costy = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffsP)' * Q * (y_coeffsP) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costy = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffsP)' * Q * (y_coeffsP) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs + obstacleWeight*sum(costmap[cells]) +velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangey = (costy-cost1)/perturbStep;
         z_coeffsP = A_inv * [z_constr; z_free+[0;perturbStep; 0]] ;
-        cells, outOfBounds = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffsP, times, get_grid_resolution(), 
+        cells, outOfBoundsGD2 = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffsP, times, get_grid_resolution(), 
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of zbounds")
             break;
         end
-        costz = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffsP)' * Q * (z_coeffsP))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costz = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffsP)' * Q * (z_coeffsP))/3/lowerQeffs + obstacleWeight*sum(costmap[cells])+ velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangez = (costz-cost1)/perturbStep;
         #Check the cost of each perturbed poly, in other dimension
         x_coeffsP = A_inv * [x_constr; x_free+[0;0; perturbStep2]];
-        cells,outOfBounds = occupancyCellChecker(x_coeffsP, y_coeffs, z_coeffs, times, get_grid_resolution(),
+        cells,outOfBoundsGD2 = occupancyCellChecker(x_coeffsP, y_coeffs, z_coeffs, times, get_grid_resolution(),
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of x2bounds")
             break;
         end
-        costx = ((x_coeffsP)' * Q * (x_coeffsP) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costx = ((x_coeffsP)' * Q * (x_coeffsP) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs + obstacleWeight*sum(costmap[cells])+ velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangex2 = (costx-cost1)/perturbStep2;
         y_coeffsP = A_inv * [y_constr; y_free+[0;0; perturbStep2]];
-        cells, outOfBounds = occupancyCellChecker(x_coeffs, y_coeffsP, z_coeffs, times, get_grid_resolution(), 
+        cells, outOfBoundsGD2 = occupancyCellChecker(x_coeffs, y_coeffsP, z_coeffs, times, get_grid_resolution(), 
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of y2bounds")
             break;
         end
-        costy = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffsP)' * Q * (y_coeffsP) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costy = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffsP)' * Q * (y_coeffsP) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs + obstacleWeight*sum(costmap[cells])+ velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangey2 = (costy-cost1)/perturbStep2;
         z_coeffsP = A_inv * [z_constr; z_free+[0;0; perturbStep2]];
-        cells, outOfBounds = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffsP, times, get_grid_resolution(), 
+        cells, outOfBoundsGD2 = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffsP, times, get_grid_resolution(), 
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of z2bounds")
             break;
         end
-        costz = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffsP)' * Q * (z_coeffsP))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costz = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffsP)' * Q * (z_coeffsP))/3/lowerQeffs +obstacleWeight*sum(costmap[cells])+ velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangez2 = (costz-cost1)/perturbStep2;
         
         ##########Velocity differences############################
                 #Check the cost of each perturbed poly, in other dimension
         x_coeffsP = A_inv * [x_constr; x_free+[perturbStep3;0; 0]];
-        cells,outOfBounds = occupancyCellChecker(x_coeffsP, y_coeffs, z_coeffs, times, get_grid_resolution(),
+        cells,outOfBoundsGD2 = occupancyCellChecker(x_coeffsP, y_coeffs, z_coeffs, times, get_grid_resolution(),
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of x3bounds")
             break;
         end
-        costx = ((x_coeffsP)' * Q * (x_coeffsP) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costx = ((x_coeffsP)' * Q * (x_coeffsP) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs + obstacleWeight*sum(costmap[cells])+ velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangex3 = (costx-cost1)/perturbStep3;
         y_coeffsP = A_inv * [y_constr; y_free+[perturbStep3;0; 0]];
-        cells, outOfBounds = occupancyCellChecker(x_coeffs, y_coeffsP, z_coeffs, times, get_grid_resolution(), 
+        cells, outOfBoundsGD2 = occupancyCellChecker(x_coeffs, y_coeffsP, z_coeffs, times, get_grid_resolution(), 
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of y3bounds")
             break;
         end
-        costy = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffsP)' * Q * (y_coeffsP) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costy = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffsP)' * Q * (y_coeffsP) + (z_coeffs)' * Q * (z_coeffs))/3/lowerQeffs +obstacleWeight*sum(costmap[cells])+ velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangey3 = (costy-cost1)/perturbStep3;
         z_coeffsP = A_inv * [z_constr; z_free+[perturbStep3;0; 0]];
-        cells, outOfBounds = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffsP, times, get_grid_resolution(), 
+        cells, outOfBoundsGD2 = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffsP, times, get_grid_resolution(), 
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
+        if(outOfBoundsGD2)
             println("path went out of z3bounds")
             break;
         end
-        costz = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffsP)' * Q * (z_coeffsP))/3/lowerQeffs +
-            obstacleWeight*sum(costmap[cells])+endWeight*(abs(evaluate_poly(y_coeffs,0,1)- final_Pos.y)+abs(evaluate_poly(x_coeffs,0,1)-final_Pos.x)
- +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
+        costz = ((x_coeffs)' * Q * (x_coeffs) + (y_coeffs)' * Q * (y_coeffs) + (z_coeffsP)' * Q * (z_coeffsP))/3/lowerQeffs + obstacleWeight*sum(costmap[cells])+ velWeightGD*sum(abs(sqrt(evaluate_poly(y_coeffs,1,summingTimes).^2+evaluate_poly(x_coeffs,1,summingTimes).^2)-max_vel));
         rateChangez3 = (costz-cost1)/perturbStep3;
 
         #Calculate the vector direction of maximum descent
@@ -801,11 +805,11 @@ function crudyGradientDescent2(iterations, perturbStep, x_coeffs, y_coeffs, z_co
         x_coeffs = A_inv * [x_constr; x_free];
         y_coeffs = A_inv * [y_constr; y_free];
         z_coeffs = A_inv * [z_constr; z_free];
-        cells,outOfBounds = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffs, times, get_grid_resolution(), 
+        cells,outOfBoundsGD2 = occupancyCellChecker(x_coeffs, y_coeffs, z_coeffs, times, get_grid_resolution(), 
             get_grid_resolution(), get_grid_resolution(), dim, aggressParam,timeStep);
         #Check if out of bounds and break out since without accurate costs things would get messed up
-        if(outOfBounds)
-            println("path went out of bounds")
+        if(outOfBoundsGD2)
+            println("path went out of bounds after total grad step")
             break;
         end
         #The division by three is to normalize the costs from the coefficients
@@ -843,7 +847,7 @@ function crudyGradientDescent2(iterations, perturbStep, x_coeffs, y_coeffs, z_co
     if(count2Iterations >iterations)
         println("Optimization ended because went through all iterations")
     end
-    return x_coeffs, y_coeffs, z_coeffs, cells, outOfBounds;
+    return x_coeffs, y_coeffs, z_coeffs, cells, outOfBoundsGD2;
     
 end
 
