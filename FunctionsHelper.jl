@@ -691,7 +691,7 @@ function crudyGradientDescent2(iterations, perturbStep, x_coeffs, y_coeffs, z_co
     tcells = zeros(Int64,0,1);
     cells = zeros(Int64,0,1);
     #create a time vector from time for summing up costs
-    summingTimes = collect(linspace(times[1],times[end],timeRes) #the one hundred should be a value
+    summingTimes = collect(linspace(times[1],times[end],timeRes)) #the one hundred should be a value
     while(unOptimized && count2Iterations  <= iterations)
         #Check the cost of each perturbed poly, if increased, change the perturbation direction, record the rate of change
         x_coeffsP = A_inv * [x_constr; x_free+[0; perturbStep; 0]];

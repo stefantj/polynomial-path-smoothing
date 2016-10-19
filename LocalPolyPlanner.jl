@@ -160,7 +160,7 @@ else
  +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
     x_coeffs, y_coeffs, z_coeffs, pcells, outOfBounds = crudyGradientDescent2(iterations, perturbStep, x_coeffs, 
         y_coeffs, z_coeffs, times, dim, aggressParam, timeStep, Q,
-    A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2,totVelWeight2,perturbStep3)
+    A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2,totVelWeight2,perturbStep3,max_vel)
     #Set tcells to cells CELLS are broken and I do not know why
 
 end
@@ -207,7 +207,7 @@ if(!outOfBounds)
              +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
                 x_coeffs, y_coeffs, z_coeffs, pcells, outOfBounds = crudyGradientDescent2(iterations, perturbStep, x_coeffs,
                     y_coeffs, z_coeffs, times, dim, aggressParam, timeStep, Q,
-                A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2,totVelWeight2,perturbStep3)
+                A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2,totVelWeight2,perturbStep3,max_vel)
             end
             #Check Collision againif in bounds
             if(!outOfBounds)
@@ -248,7 +248,7 @@ if(!outOfBounds)
              +abs(evaluate_poly(z_coeffs,0,1)-final_Pos.z)*(dim == 3));
                     x_coeffs, y_coeffs, z_coeffs, pcells, outOfBounds = crudyGradientDescent2(iterations, perturbStep, x_coeffs, 
                         y_coeffs, z_coeffs, times, dim, aggressParam, timeStep, Q,
-                    A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2,totVelWeight2,perturbStep3)
+                    A_inv, x_constr, x_free,y_free, z_free, cost1, costmap, perturbStep2,totVelWeight2,perturbStep3,max_vel)
                             #Check if out of bounds and avoid loop
                     if(outOfBounds)
                                 println("path went out of bounds in restarts")
