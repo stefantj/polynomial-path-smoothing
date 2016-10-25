@@ -1,4 +1,5 @@
-using PyPlot #So plots can be used
+using PyPlot # So plots can be used
+using JuMP   # Setup using JuMP so that we have access to its methods
 
 #Classes/Objects without the functions
 #Convention Notes: 
@@ -7,13 +8,6 @@ using PyPlot #So plots can be used
 #               pos,vel,accel,jerk,...->1,2,3,4,...
 # Using matrices would require all polynomials to be the same degree and exact matching of values 
 # A capital P will mean that a variable is private and should not be worried for initialization
-
-#TODO: Use arrays instead of structs?
-type Point     # Used to store locations in the configuration space
-   x::Float64
-   y::Float64
-   z::Float64
-end 
 
 #ASSUMPTION: all paths start at t = 0 seconds
 type PathSol                    # The polynomial path solution
@@ -59,6 +53,8 @@ type TuningParams                      # All the knobs to turn for tuning
     max_accel::Float64                 # Max total acceleration the path is restricted to
     max_jerk::Float64                  # Max total jerk the path is restricted to
     numberOfRandomRestarts::Int64      # Number of random restarts to do before giving up
+    timeWeight::Float64                # Weight applied to time
+    timeRes::Int64                     # How many points for determining limits and constraints
 end
 
 
@@ -104,22 +100,29 @@ function lotusTest(initial_distance::Float64,
     #For 3 times
     for numberOFTests = 1:3
         #Create the matrix of start and end points x = 1st column and y = 2nd column
-        startPoints = [-distanceHolder*cos(angles2Test) #x
-                       -distanceHolder*sin(angles2Test)]#y
-        endPoints = [distanceHolder*cos(angles2Test) #x
-                     distanceHolder*sin(angles2Test)]#y
+        startPoints = [-distanceHolder*cos(angles2Test) -distanceHolder*sin(angles2Test)]
+        endPoints = [distanceHolder*cos(angles2Test) distanceHolder*sin(angles2Test)]
         #For each set of points
         for looper = 1:size(startPoints, 1)
             #########Call the planner###################################
             #TODO make this more efficient
-            #Create a copy of the pathProb and change the initial and final configurations
+            #Create a copy of the pathProb and 
             probCopy = pathProb;
-            probCopy.start_config[:,1] = [startPoints[looper,1];#x start position
-                                          startPoints[looper,2];#y
-                                          0]                    #z 
-            probCopy.end_config[:,1] = [endPoints[looper,1];#x end position
-                                        endPoints[looper,2];#y
-                                        0]                  #z 
+            #This is a 2D test at the moment
+            probCopy.isDim3 = false;
+            #make sure the input is of the right size
+            if(size(probCopy.start_config,1) > 2)
+                probCopy.start_config = probCopy.start_config[1:2,:];
+            end
+            if(size(probCopy.end_config,1) > 2)
+                probCopy.end_config = probCopy.end_config[1:2,:];
+            end
+            #change the initial and final configurations
+            probCopy.start_config[:,1] = [startPoints[looper,1]; #x start position
+                                          startPoints[looper,2]];#y
+            
+            probCopy.end_config[:,1] = [endPoints[looper,1]; #x end position
+                                        endPoints[looper,2]];#y
             #Call the planner
             solution = runPathPlanner(tuningVars,probCopy);
             #plot each iteration
@@ -457,15 +460,49 @@ end
 ##Create a Function Stub for the path planner
 function runPathPlanner(tuning::TuningParams, 
                         prob::PathProblem)
+    #Initialize the solution and solvehelper
+    solution = PathSol( 0.0,     # totTime::Float64 
+                        [0.0]'', # coeffs::Array{Float64,2}  
+                        [1],     # cells::Array{Int64,1}  
+                        0.0)     # cost::Float64     
+    solvHelp = PolyPathSolver(  [0.0]'', #PA_inv::Array{Float64,2}           
+                            [0.0]'', #    PQ::Array{Float64,2}              
+                            [0.0]'', #    PoptimizeMatrix::Array{Float64,2}  
+                            false,   #    PoutOfBounds::Bool                 
+                            false,   #    PunVerified::Bool                
+                            10,      #    counterRestart::Int64             
+                            100);    #    counterVerified::Int64 
+    #If dijkstras Create a normalized direction vector
+    if(prob.DijkstraNotFMT)
+        addDirectedSpeed!(prob, tuning.max_vel);
+    end
+    #Construct the constraint vectors, orders, and timeIndex given start, end, dof and soft constraint vectors
+    #TODO: make void functions with pointers to avoid so much copying
+    prob = constructConstr(prob)
+
+    #initialize time and while loop until verified #increment time?
+    solution.totTime = 7.0;
+
+    #Form A_inv
+    solvHelp.PA_inv = constr_Ainv(  prob.PconstraintOrders,
+                                    prob.PtimeIndex*solution.totTime, #Multiply by the total time for proper function
+                                    prob.Pdegree);
+
+    #Add/subtract stuff to/from q_coeff if not equal to the degree
+    tuning.q_coeff = checkQcoeffs(tuning.q_coeff, prob.Pdegree)
+    #Form Q
+    solvHelp.PQ = form_Q(tuning.q_coeff,solution.totTime);
+
+    #Form OptimizeMat
+    solvHelp.PoptimizeMatrix = form_OptimizeMat(prob,tuning,solvHelp);
+
+    #update the free constraints as necessary
+    prob.PconstrFree = updateFreeConstr(prob,solvHelp);
+    #8)SOLVE for the polynomial coefficients
+    solution.coeffs = solvePolysInitially(prob,solvHelp);
 
     #Just a stub for now
-    return PathSol(5.0,
-    [prob.start_config[1,1] (prob.end_config[1,1]-prob.start_config[1,1])/5.0; #x_coeffs
-     prob.start_config[2,1] (prob.end_config[2,1]-prob.start_config[2,1])/5.0; #y_coeffs
-     prob.start_config[3,1] (prob.end_config[3,1]-prob.start_config[3,1])/5.0; #z_coeffs
-     0 0],#p_coeffs
-    [1], #cells
-    50) #cost
+    return solution;
 
     
 end
@@ -478,3 +515,14 @@ end
 function get_grid_resolution()
     return 0.1
 end
+
+
+
+
+
+
+
+
+
+
+
