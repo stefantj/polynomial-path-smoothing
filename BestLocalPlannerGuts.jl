@@ -253,7 +253,7 @@ function form_OptimizeMat(prob::PathProblem,tuning::TuningParams,solvStuff::Poly
     return optimizeMat
 end
 
-## udpateFreeConstr
+## updateFreeConstr
 #Description - will do the matrix multiplication of optimizeMat and the fixed constraints to get the optimal free constraints
 # w.r.t. the derivative costs.
 #Assumptions
@@ -275,7 +275,7 @@ function updateFreeConstr(prob::PathProblem,solvStuff::PolyPathSolver)
         #Non soft constraints will have zeros
         addSofts[i,end-size(prob.PconstraintSoft,2)+1:end] = prob.PconstraintSoft[i,:];
         #The actual calculation is Opt_mat * d_f + d_softs
-        prob.PconstrFree[i,:] = solvStuff.PoptimizeMatrix * prob.PconstrFree[i,:] + addSofts[i,:];
+        prob.PconstrFree[i,:] = solvStuff.PoptimizeMatrix * prob.PconstrFixed[i,:] + addSofts[i,:];
     end
     return prob.PconstrFree;
 end
@@ -329,4 +329,279 @@ function createDerivMat(deg::Int64, deriv::Int64)
         #TODO: make better
     end
     return mat;
+end
+
+## occupancyCellChecker 
+#Description gets a path and finds the unique cell IDs in the occupancy grid that the path goes through.
+#Assumptions
+# An occupancy function exists that is called as follows ID = occupancy_get_id(x,y,z)
+# Path starts at zero time
+# Solution has coefficient vectors of the same length
+# The grid is [0, get_grid_extent] x [0, get_grid_extent]
+# There is uniform resolution in each direction
+# The dimension must is either 2 or 3
+# Cutting corners okay sometimes
+#Inputs/Needed Variables
+# sol - a PathSol object that has the following values
+#   totTime::Float64            # Total time of the polynomial path in seconds
+#   coeffs::Array{Float64,2}    # X, Y, Z, and Yaw coefficients
+# prob - a PathProblem object with the following values
+#   isDim3::Bool                     # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
+#   grid_extent::Float64             # The extent of the cost map in meters
+#   grid_resolution::Float64         # The resolution of the cost map in meters
+# tuning - a TuningParams object that has the following variables
+#   timeStep::Float64                  # The increment in time to determine the cells that a path goes through
+#   aggressParam::Float64              # Closer to 0 means check every point on the path, infinity => check no points
+#Outputs
+# occupancy_vec - a vector of the occupancy IDs that the polynomial is characterized by (not unique but can be)
+# outOfBounds - a boolean that is true if the polynomial goes outside of the grid
+function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningParams)
+   
+    #Create the dim variable
+    dim = 2+prob.isDim3;
+    #Start outOfBounds as false
+    outOfBounds = false;
+
+    #Read in the coefficients into a matrix
+    coeffMat = sol.coeffs
+    #Create a holder for delta_t's and pts when we get there in the for loop
+    delta_t = zeros(dim);
+    pts = zeros(3); #Three is used here since if dim is something other than 3 at this point the values are set to zero
+    occupancy_vec = zeros(Int64, 0,1);
+   
+    #Initialize times assuming polynomials are solve at 0 time initial
+    t = 0;
+    timeFin = sol.totTime;
+    #Time step will give you the resolution of the time steps in the loops
+    timeStep = tuning.timeStep;
+    #Calculate the distance time to travel in a direction before getting occupancy grid id 
+    dist = prob.grid_resolution * tuning.aggressParam;
+    #Loop for 2 or 3 dimensions
+    for looper = 1:dim
+        #Create previous point vector
+        pts[looper] = evaluate_poly(coeffMat[looper,:],0,t);
+        #Create an initial dist that should be checked the first time 
+        distInit = minimum( [mod(pts[looper],prob.grid_resolution),
+                             prob.grid_resolution-mod(pts[looper],prob.grid_resolution)])
+        #Check if in bounds
+        if(pts[looper] < 0 || pts[looper] > prob.grid_extent)
+            outOfBounds = true;
+        end
+        #Create a variable to change temporarily
+        t_new = t;
+        counter = 0;
+        #Calculate the time at which the change in distance is more than our distance to travel
+        while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < distInit && counter < 1/timeStep)
+            #If we haven't gotten higher than what we want to travel increment the time
+            t_new += timeStep;
+            #println(t_new)
+            counter += 1;
+        end
+        #Set the new delta_t
+        delta_t[looper] = abs(t_new - t);
+    end
+
+    #Check if at the or past the end time and loop if not 
+    while(t < timeFin) 
+        #Find the smallest one
+        changeDelta, deltaIndex = findmin(delta_t)
+        #Move the time by the smallest one
+        t += changeDelta;
+        #Decrease the delta t's for the others
+        for looper = 1:dim
+            #Subract the smallest delta t from the other deltas
+            delta_t[looper] -= changeDelta;
+        end
+        #Find the x,y,z of the current time
+        for looper = 1:dim
+            pts[looper] = evaluate_poly(coeffMat[looper, :], 0, t);
+            #Check if in bounds if not leave the function early
+            if(pts[looper] < 0 || pts[looper] > prob.grid_extent)
+                outOfBounds = true;
+                return unique(occupancy_vec), outOfBounds;
+            end
+        end
+        #Find occupancy ID at current point by adding to a vector
+        occupancy_vec = [occupancy_vec; occupancy_get_id(pts[1], pts[2], pts[3], prob)];
+        #Evaluate the new delta_t for the dimension
+        for looper = 1:dim
+            if(delta_t[looper] == 0)
+                #Create a variable to change temporarily
+                t_new = t;
+                counter = 0;
+                #Calculate the time at which the change in distance is more than our distance to travel
+                while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < dist && counter < 1000)
+                    #If we haven't gotten higher than what we want to travel increment the time
+                    t_new += timeStep;
+                    counter += 1;
+                end
+                #Set the new delta_t
+                delta_t[looper] = abs(t_new - t);
+            end
+        end
+    end
+    #Check the final point just in case based on passed dimension
+    #println("final point")
+    if(dim == 3)
+        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
+                                                         evaluate_poly(coeffMat[2,:],0,timeFin),
+                                                         evaluate_poly(coeffMat[3,:],0,timeFin), prob)];
+    elseif(dim == 2)
+        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
+                                                         evaluate_poly(coeffMat[2,:],0,timeFin),
+                                                         0,prob)];
+    end
+    #Return the vector of unique occupancy grids (could be non unique)
+    return unique(occupancy_vec), outOfBounds;
+end
+
+## occupancy_get_id
+#Description - returns the cell id of the point (xyz). Returns an integer.
+#Assumptions
+# All point are within the map
+#Inputs
+# x,y,z - the respective points on a path
+# problem1 - a PathProblem object with the following members:
+#   grid_extent::Float64             # The extent of the cost map in meters
+#   grid_resolution::Float64         # The resolution of the cost map in meters
+#Outputs
+# The integer index to a 3d array
+function occupancy_get_id(x,y,z, problem1)
+    width = problem1.grid_extent;
+    res   = problem1.grid_resolution;
+    n = round(Int64,ceil(width/res));
+    return sub2ind((n,n,n),floor(Int64,x/res)+1,floor(Int64,y/res)+1,floor(Int64,z/res)+1)
+end
+
+## simpleVerifyFeas
+#Description - checks if the smooth path is feasible given robots limits on speed, accel, and jerk
+#Assumptions
+# Polynomials of the same degree
+# Only one segment
+#Inputs
+# sol - a PathSol object containing:
+#   totTime::Float64            # Total time of the polynomial path in seconds
+#   coeffs::Array{Float64,2}    # X, Y, Z, and Yaw coefficients
+# tuning - a TuningParams object that contains: 
+#   max_vel::Float64                   # Max total velocity the path is restricted to
+#   max_accel::Float64                 # Max total acceleration the path is restricted to
+#   max_jerk::Float64                  # Max total jerk the path is restricted to
+#   timeRes::Int64                     # How many points for determining limits and constraints
+#Outputs
+# timeProbv - a vector of values that did not pass
+# timeProbm - a vector of numbers 1-3 corresponding to where motion is infeasible based on 1 velocity, 2 accel, and 3 jerk
+#Function verifyActuateablePath checks if the smooth path is feasible given robots limits
+function simpleVerifyFeas(sol::PathSol, tuning::TuningParams)
+    #Create empty holders at first
+    timeProbv = zeros(0,1);
+    timeProbm = zeros(0,1);
+    #Create a matrix of the limits
+    max_lims = [tuning.max_vel;
+                tuning.max_accel;
+                tuning.max_jerk]
+    #create a dim variable
+    dim = size(sol.coeffs,1);
+
+    #Create the time vector 
+    t = collect(linspace(0,sol.totTime,tuning.timeRes));
+    
+    #Initialize a container for checking all the limits
+    checkingMat = zeros(dim,length(t))
+    for j = 1:3
+        #Calculate the derivative
+        #initialize the summer
+        totalSum = 0;
+        for i = 1:dim
+            #calculate the respective derivative
+            checkingMat[i,:] = evaluate_poly(sol.coeffs[i,:],j,t);
+            #sum its square
+            totalSum += checkingMat[i,:].^2;
+        end
+        #Sqaure root the sum and compare
+        totalSum = sqrt(totalSum);
+        timeProbv = [timeProbv; totalSum[find(totalSum .> max_lims[j])]];
+        timeProbm = [timeProbm; 0*find(totalSum .> max_lims[j])+j]
+    end
+    return timeProbv, timeProbm;
+end
+
+## initializeTime
+#Description - sets the time to be as fast as possible given the distance to travel and the max_vel. This is done to avoid an
+# observed phenomenon of the solution shooting out of bounds if the initial time lead to huge velocities, accels, and jerks.
+#Assumptions
+# This will avoid the phenomenon (not sure this is valid for all cases especially if robot is going in the wrong direction to start)
+#Inputs
+# prob - a PathProblem object that has:
+#   start_config::Array{Float64,2}   # Initial conditions with pos, vel, acc, jerk, ...
+#   end_config::Array{Float64,2}     # Final conditions with pos, vel, acc, jerk,... in that order
+#   isDim3::Bool                     # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
+# tuning - a TuningParams object that has:
+#   timeIncrease::Float64              # The increment by which to increase time if path is found infeasible
+#   max_vel::Float64                   # Max total velocity the path is restricted to
+#Outputs
+# totTime - the reasonable total time to start the solution off at
+function initializeTime(prob, tuning)
+    #Initialize
+    totTime = 0.0;
+    for i = 1:(2+prob.isDim3)
+        #Sum sqaure distances
+        totTime += (prob.start_config[i,1]-prob.end_config[i,1])^2;
+    end
+    #sqrt and then divide by max_vel and then subtract the timeIncrease that will be added immediately after this
+    totTime = sqrt(totTime)
+    totTime /= tuningI.max_vel;
+    totTime -= tuningI.timeIncrease;
+    return totTime;
+end
+
+## debugPlot
+#Description - plots the path and various derivative magnitudes with no background and can be used even if out of bounds
+#Inputs
+# sol - PathSol object with:
+#   totTime::Float64            # Total time of the polynomial path in seconds
+#   coeffs::Array{Float64,2}    # X, Y, Z, and Yaw coefficients
+# prob - PathProblem object with:
+#   isDim3::Bool                # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
+# tuning - TuningParams object with:
+#   timeRes::Int64              # How many points for determining limits and constraints
+#Outputs
+# Plots... with labels son! Aight! Cool...
+function debugPlot(sol, prob, tuning)
+    #Create times according to resolution
+    plotTimes = linspace(0,sol.totTime,tuning.timeRes)
+    #First figure is position
+    figure(1)
+    if(prob.isDim3)
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
+                evaluate_poly(sol.coeffs[3,:],0,plotTimes)) #z
+        #Extra label for 3D: rad!
+        zlabel("Z (m)")
+    else
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes)) #y 
+    end
+    #Labels Homeboi!
+    title("Position")
+    xlabel("X (m)")
+    ylabel("Y (m)")
+    #Titles and ylabels for reference in the for loop boi!
+    titles = ["Velocity Magnitude", "Acceleration Magnitude", "Jerk Magnitude"]
+    ylabels = ["Velocity Magnitude (m/s)", "Acceleration Magnitude(m/s^2)", "Jerk Magnitude (m/s^3)"]
+    for i =1:3
+        figure(i+1)
+        if(prob.isDim3)
+            #Various derivatives are sqaured summed and sqrt'ed
+            plot(   plotTimes, sqrt(evaluate_poly(sol.coeffs[1,:],i,plotTimes).^2 + #x
+                                    evaluate_poly(sol.coeffs[2,:],i,plotTimes).^2 + #y
+                                    evaluate_poly(sol.coeffs[3,:],i,plotTimes).^2)) #z
+        else
+            plot(   plotTimes, sqrt(evaluate_poly(sol.coeffs[1,:],i,plotTimes).^2 + #x
+                                    evaluate_poly(sol.coeffs[2,:],i,plotTimes).^2)) #y
+        end
+        title(titles[i])
+        ylabel(ylabels[i])
+        #Time label is same for all plots
+        xlabel("Time (s)")
+    end
 end
