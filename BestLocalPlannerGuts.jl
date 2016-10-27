@@ -684,12 +684,11 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
                                 evaluate_poly(p[3,:],2,timesCheck ).^2)- # z
                                 tuning.max_accel*tuning.percentAcc).^2); # minus the max_vel and square
     else
-        accelCost = sum((sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + # x
-                            evaluate_poly(p[2,:],2,timesCheck).^2)- # y
-                        tuning.max_accel*tuning.percentAcc).^2) ;                       # minus the max_vel and square
+        accelCost = 0;
     end
     #Add a cost for being above
-
+    temp = sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + evaluate_poly(p[2,:],2,timesCheck).^2)
+    accelCost += sum((temp -  tuning.max_accel*tuning.percentAcc).*(sign(temp - tuning.max_accel*tuning.percentAcc)+1));                       # minus the max_vel and square
     #Add a weight
     #Note that Vel cost is usually around order of 100 with a weight of 1
     accelCost *= tuning.accelWeight;
