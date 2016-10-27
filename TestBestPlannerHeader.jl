@@ -464,27 +464,33 @@ end
 ##Create a Function Stub for the path planner
 function runPathPlanner(tuning::TuningParams, 
                         prob::PathProblem)
-    #Initialize the solution and solvehelper
+    seedForRandomness = 1;
+    srand(seedForRandomness);
+
+    #Initialize solver and solution
     solution = PathSol( 0.0,     # totTime::Float64 
                         [0.0]'', # coeffs::Array{Float64,2}  
                         [1],     # cells::Array{Int64,1}  
-                        0.0)     # cost::Float64     
+                        0.0)     # cost::Float64         
     solvHelp = PolyPathSolver(  [0.0]'', #PA_inv::Array{Float64,2}           
-                            [0.0]'', #    PQ::Array{Float64,2}              
-                            [0.0]'', #    PoptimizeMatrix::Array{Float64,2}  
-                            true,    #    PoutOfBounds::Bool                 
-                            true,    #    PunVerified::Bool                
-                            10,      #    counterRestart::Int64             
-                            100);    #    counterVerified::Int64 
+                                [0.0]'', #    PQ::Array{Float64,2}              
+                                [0.0]'', #    PoptimizeMatrix::Array{Float64,2}  
+                                true,    #    PoutOfBounds::Bool                 
+                                true,    #    PunVerified::Bool                
+                                10,      #    counterRestart::Int64             
+                                100);    #    counterVerified::Int64    
+    #Create a costmap
+    prob.costmap = createCostMap(1,problem);
+
     #If dijkstras Create a normalized direction vector
     if(prob.DijkstraNotFMT)
         addDirectedSpeed!(prob, tuning.max_vel);
     end
+
     #Construct the constraint vectors, orders, and timeIndex given start, end, dof and soft constraint vectors
     #TODO: make void functions with pointers to avoid so much copying
     prob = constructConstr(prob)
 
-    
     #initialize time to a reasonable time so polynomial doesn't explode, a reasonable time will be
     solution.totTime = initializeTime(prob, tuning);
 
@@ -500,6 +506,7 @@ function runPathPlanner(tuning::TuningParams,
 
         #Add/subtract stuff to/from q_coeff if not equal to the degree
         tuning.q_coeff = checkQcoeffs(tuning.q_coeff, prob.Pdegree)
+
         #Form Q
         solvHelp.PQ = form_Q(tuning.q_coeff,solution.totTime);
 
@@ -508,11 +515,18 @@ function runPathPlanner(tuning::TuningParams,
 
         #update the free constraints as necessary
         prob.PconstrFree = updateFreeConstr(prob,solvHelp);
-        #8)SOLVE for the polynomial coefficients
+
+        #solve for the polynomial coefficients
         solution.coeffs = solvePolysInitially(prob,solvHelp);
 
         #Check in bounds and collect the cells
         solution.cells, solvHelp.PoutOfBounds = occupancyCellChecker(solution, prob, tuning);
+
+        #Break if out of bounds and display an error
+        if(solvHelp.PoutOfBounds)
+            println("Plan Fail: Went out of Bounds")
+            break;
+        end
 
         #Verify good path
         errorVals, errorTypes = simpleVerifyFeas(solution, tuning)
@@ -523,9 +537,96 @@ function runPathPlanner(tuning::TuningParams,
             continue; 
         end
         #If verified do not say verified  until next verify
+        
+        #Create a holder for the free constr
+        df = form_df(prob);
+
+        #optimize free constraints with limits built in using the COST function
+        #Do one iteration solve next iteration repeat
+        for i = 1:tuningI.iterations
+            result = optimize(x -> costFunc(x, solution, prob, solvHelp, tuning), df,
+                                            GradientDescent(),
+                                            OptimizationOptions(iterations = 1));
+
+            #Save the result of the optimization
+            df = Optim.minimizer(result)
+
+            #Resolve df into the respective free constraints and solve again
+            prob.PconstrFree = decompose_df(df, prob);
+
+            #solve for the polynomial coefficients
+            solution.coeffs = solvePolysInitially(prob,solvHelp);
+
+            #Check in bounds and collect the cells
+            solution.cells, solvHelp.PoutOfBounds = occupancyCellChecker(solution, prob, tuning);
+        end
+
+
+        #Break if out of bounds and display an error
+        if(solvHelp.PoutOfBounds)
+            println("Plan Fail: Went out of Bounds")
+            break;
+        end
+
+        #Verify good path Number 2
+        errorVals, errorTypes = simpleVerifyFeas(solution, tuning)
+
+        #If not verified increment time
+        if(!isempty(errorVals))
+            #Repeat loop over
+            continue; 
+        end
         solvHelp.PunVerified = false;
+
+        #end while loop
     end
-    #Just a stub for now
+
+
+    #Start random restarts if hitting an obstacle
+    restartCounter = 0;
+    while(any(prob.costmap[solution.cells] .>= 255) && restartCounter < tuning.numberOfRandomRestarts)
+
+        #Print message about hitting an obstacle and random restarting
+        println("Hit and Obstacle; Trying a random restart")
+
+        #Create random start
+        prob.PconstrFree = createRandomRestart(prob, tuning);
+
+        #optimize - note there is no verification step anymore so no more increasing time this could cause problems
+        # later
+        #Create a holder for the free constr
+        df = form_df(prob);
+
+        #1)OPTIMIZE free constraints with limits built in; 2)COST function
+        #Do one iteration solve next iteration repeat
+        for i = 1:tuning.iterations
+            result = optimize(x -> costFunc(x, solution, prob, solvHelp, tuning), df,
+                                            GradientDescent(),
+                                            OptimizationOptions(iterations = 1));
+
+            #Save the result of the optimization
+            df = Optim.minimizer(result)
+
+            #Resolve df into the respective free constraints and solve again
+            prob.PconstrFree = decompose_df(df, prob);
+
+            #solve for the polynomial coefficients
+            solution.coeffs = solvePolysInitially(prob,solvHelp);
+
+            #Check in bounds and collect the cells
+            solution.cells, solvHelp.PoutOfBounds = occupancyCellChecker(solution, prob, tuning);
+        end
+
+        #Increment the counter
+        restartCounter += 1; 
+    end
+
+    #Print if failed to plan a path around obstacle
+    if(restartCounter >= tuning.numberOfRandomRestarts)
+        println("Path Planning Failed even with Restarts: Sad Face :(")
+    end
+
+    #Return path
     return solution;
 
     
