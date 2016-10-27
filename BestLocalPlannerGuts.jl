@@ -287,7 +287,7 @@ end
 #Assumptions
 # All the dimensions of the problem have the same number of soft constraints and free constraints
 #Inputs
-# prob - the PathProblem object with the following values:
+# prob1 - the PathProblem object with the following values:
 #   PconstrFixed::Array{Float64,2}   # All fixed constraints
 #   PconstrFree::Array{Float64,2}    # A holder for all soft and free contraints
 #   isDim3::Bool                     # The flag for 3D; 2 will be added later so the dimension is only 2 or 3  
@@ -296,13 +296,13 @@ end
 #   PA_inv::Array{Float64,2}         # The matrix that transforms constraints to coefficients A_inv*d=p
 #Outputs
 # coeffs - the polynomial coefficients in a matrix
-function solvePolysInitially(prob,solvStuff)
+function solvePolysInitially(prob1,solvStuff)
     #initialize the coeeffs variable
-    coeffs = zeros(2+prob.isDim3,prob.Pdegree)
+    coeffs = zeros(2+prob1.isDim3,prob1.Pdegree)
     #for each dimension
-    for i = 1:(2+prob.isDim3)
+    for i = 1:(2+prob1.isDim3)
         #p = A^-1 * d
-        coeffs[i,:] = solvStuff.PA_inv * [prob.PconstrFixed[i,:]' prob.PconstrFree[i,:]']';
+        coeffs[i,:] = solvStuff.PA_inv * [prob1.PconstrFixed[i,:]' prob1.PconstrFree[i,:]']';
     end
     return coeffs;
 end
@@ -369,6 +369,7 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
     pts = zeros(3); #Three is used here since if dim is something other than 3 at this point the values are set to zero
     occupancy_vec = zeros(Int64, 0,1);
    
+    #TODO: Make this a do while
     #Initialize times assuming polynomials are solve at 0 time initial
     t = 0;
     timeFin = sol.totTime;
@@ -383,9 +384,10 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
         #Create an initial dist that should be checked the first time 
         distInit = minimum( [mod(pts[looper],prob.grid_resolution),
                              prob.grid_resolution-mod(pts[looper],prob.grid_resolution)])
-        #Check if in bounds
+        #Check if in bounds and stop the function early
         if(pts[looper] < 0 || pts[looper] > prob.grid_extent)
             outOfBounds = true;
+            return unique(occupancy_vec), outOfBounds;
         end
         #Create a variable to change temporarily
         t_new = t;
@@ -519,8 +521,8 @@ function simpleVerifyFeas(sol::PathSol, tuning::TuningParams)
         end
         #Sqaure root the sum and compare
         totalSum = sqrt(totalSum);
-        timeProbv = [timeProbv; totalSum[find(totalSum .> max_lims[j])]];
-        timeProbm = [timeProbm; 0*find(totalSum .> max_lims[j])+j]
+        timeProbv = [timeProbv; totalSum[find(totalSum .> max_lims[j]+tuning.precision)]];
+        timeProbm = [timeProbm; 0*find(totalSum .> max_lims[j]+tuning.precisionVel)+j]
     end
     return timeProbv, timeProbm;
 end
@@ -598,6 +600,244 @@ function debugPlot(sol, prob, tuning)
         else
             plot(   plotTimes, sqrt(evaluate_poly(sol.coeffs[1,:],i,plotTimes).^2 + #x
                                     evaluate_poly(sol.coeffs[2,:],i,plotTimes).^2)) #y
+        end
+        title(titles[i])
+        ylabel(ylabels[i])
+        #Time label is same for all plots
+        xlabel("Time (s)")
+    end
+end
+
+## costFunc
+#Description - the functionalized form of the objective function to be minimized with Optim.jl
+#Assumptions
+# Soft constraints are at the end
+#Inputs
+# dF - the free derivatives that can be varied in the optimization this must be separated for the optimization to work
+#  the order of df is pressumed to be x derivs low to high, then y, and z if the dimension is three
+# sol - the PathSol object with:
+#   totTime::Float64                   # Total time of the polynomial path in seconds
+#   coeffs::Array{Float64,2}           # X, Y, Z, and Yaw coefficients
+#   cells::Array{Int64,1}              # The indices of the costmap that the path goes through
+# prob - a PathProblem object that has:
+#   PconstrFixed::Array{Float64,2}     # All fixed constraints
+#   PconstrFree::Array{Float64,2}      # A holder for all soft and free contraints
+#   isDim3::Bool                       # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
+#   Pdegree::Int64                     # The degree of the polynomial to be made
+# solvStuff - a PolyPathSolver object with: 
+#   PA_inv::Array{Float64,2}           # The matrix that transforms constraints to coefficients A_inv*d=p
+#   PQ::Array{Float64,2}               # Matrix representation of the q_coeff weights
+# tuning - the TuningParams object with
+#   softConstrWeights::Array{Float64,1}# The vector of weights to make soft constraints harder
+#   numericVelWeight::Float64          # The weight for the cost for not being at max_vel at any time
+#   obstacleWeight::Float64            # The weight for the cost of going through a cell in the costmap
+#   derivativeWeight::Float64          # The weight for the combined derivative cost term
+#   timeWeight::Float64                # Weight applied to time
+#   timeRes::Int64                     # How many points for determining limits and constraints
+#Outputs
+# cost - the cost of the given path
+function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver, tuning::TuningParams)
+    #Create a dim variable
+    dim = 2+prob.isDim3;
+
+    #Create a combined vector of fixed and free constraints and the resulting poly coefficients
+    d = zeros(dim,prob.Pdegree)
+    p = zeros(dim,prob.Pdegree)
+    for i = 1:dim
+        d[i,:] = [prob.PconstrFixed[i,:]' dF[(1:size(prob.PconstrFree,2))+(i-1)*size(prob.PconstrFree,2)]'];
+        p[i,:] = solvStuff.PA_inv * d[i,:];
+    end
+    #Create the derivative cost
+    derivCost = 0;
+    for i = 1:dim
+        derivCost += (  p[i,:])' *      # p^T
+                        solvStuff.PQ *  # Q
+                       (p[i,:]);        # p
+    end
+    #Divide by the number of derivative terms and then apply the weight
+    #Note with a weight of 1 the cost is in the 100s
+    derivCost = derivCost*tuning.derivativeWeight / dim #there may be an issue with dividing by and integer
+
+    #Create the velocity cost
+    #Create a time vector 
+    timesCheck = collect(linspace(0,sol.totTime,tuning.timeRes));
+    #Sum the square errors in velocity magnitudes
+    if(prob.isDim3)
+        velCost = sum((sqrt(evaluate_poly(p[1,:],1,timesCheck).^2 + # x
+                            evaluate_poly(p[2,:],1,timesCheck ).^2 + # y
+                            evaluate_poly(p[3,:],1,timesCheck ).^2)- # z
+                       tuning.max_vel).^2) ;                       # minus the max_vel and square
+    else
+        velCost = sum((sqrt(evaluate_poly(p[1,:],1,timesCheck).^2 + # x
+                            evaluate_poly(p[2,:],1,timesCheck).^2)- # y
+                       tuning.max_vel).^2) ;                       # minus the max_vel and square
+    end
+    #Add a weight
+    #Note that Vel cost is usually around order of 100 with a weight of 1
+    velCost *= tuning.numericVelWeight;
+    
+    #Add and accel cost
+    #Sum the square errors in velocity magnitudes
+    if(prob.isDim3)
+        accelCost = sum((sqrt(  evaluate_poly(p[1,:],2,timesCheck).^2  +  # x
+                                evaluate_poly(p[2,:],2,timesCheck ).^2 + # y
+                                evaluate_poly(p[3,:],2,timesCheck ).^2)- # z
+                                tuning.max_accel*tuning.percentAcc).^2); # minus the max_vel and square
+    else
+        accelCost = sum((sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + # x
+                            evaluate_poly(p[2,:],2,timesCheck).^2)- # y
+                        tuning.max_accel*tuning.percentAcc).^2) ;                       # minus the max_vel and square
+    end
+    #Add a cost for being above
+
+    #Add a weight
+    #Note that Vel cost is usually around order of 100 with a weight of 1
+    accelCost *= tuning.accelWeight;
+
+    #Create the soft costs? assuming soft costs are at the end
+    softCosts = 0;
+    #Make sure that there are enough weights
+    tuning.softConstrWeights = checkQcoeffs(tuning.softConstrWeights, size(prob.PconstraintSoft,2))
+    for i = 1:dim
+        for j = 0:size(prob.PconstraintSoft,2)-1
+            softCosts += (d[i,end-j]-prob.PconstraintSoft[i,end-j])^2 * tuning.softConstrWeights[j+1];
+        end
+    end
+    
+    #Create costmap costs
+    #Note that the mapCost with a cell travel cost of 50 is on the order of 1000s
+    mapCost = tuning.obstacleWeight*sum(prob.costmap[sol.cells]);
+
+    #Return the total cost
+    cost = derivCost + velCost + softCosts + mapCost+accelCost;
+    return cost[1];
+end
+
+## form_df
+#Description - forms the free constraints in a form that the cost function needs for good optimization
+#Input
+# prob - a PathProblem object with: 
+#   PconstrFree::Array{Float64,2}    # A holder for all soft and free contraints
+#   isDim3::Bool                     # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
+#Output
+# reshapedFree - the free constraints in the vector order of x's, y's, and z's
+function form_df(prob)
+    #Initialize to the expected size
+    reshapedFree = zeros((2+prob.isDim3)*size(prob.PconstrFree,2))
+    for i = 1:size(prob.PconstrFree,1)
+        #Insert the correct values
+        reshapedFree[(1:size(prob.PconstrFree,2))+(i-1)*size(prob.PconstrFree,2)] = prob.PconstrFree[i,:];
+    end
+    return reshapedFree;
+end
+
+## decompose_df
+#TODO - make a void with reference parameters
+#Description - the inverse of form_df; it forms the free constraints in the form of a problem's PconstrFree
+#Input
+# dF - the form of the free constraints returned by form_df
+# prob - the PathProblem with:
+#   PconstrFree::Array{Float64,2}    # A holder for all soft and free contraints
+#Output
+# shapedFree - the problem's PconstrFree variable with the optimized values
+function decompose_df(dF, prob)
+    #Create a dim variable
+    dim = size(prob.PconstrFree,1)
+    #Initialize the free constraint  variable
+    shapedFree = zeros(dim, size(prob.PconstrFree,2));
+    for i = 1:dim
+        #Insert the correct values opposite the way in form_df
+        shapedFree[i,:] = dF[(1:size(prob.PconstrFree,2))+(i-1)*size(prob.PconstrFree,2)];
+    end 
+    return shapedFree;
+end
+
+## createCostMap
+#TODO - make it so objects are not at the beginning or end
+#Descritption - creates a cost map for a problem
+#Inputs
+# obstacles - the number of random obstacles to make
+# prob - the PathProblem object with
+#   start_config::Array{Float64,2}   # Initial conditions with pos, vel, acc, jerk, ...
+#   end_config::Array{Float64,2}     # Final conditions with pos, vel, acc, jerk,... in that order
+#   isDim3::Bool                     # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
+#   grid_extent::Float64             # The extent of the cost map in meters
+#   grid_resolution::Float64         # The resolution of the cost map in meters
+#Output
+# costmap - a costmap with obstacles that is 3D with one page only for 2D at the moment
+function createCostMap(obstacles::Int64,prob::PathProblem)
+    #Numbers to set
+    costOfEmptyCell = 0;
+    #Create an element number value
+    n = round(Int64,ceil(prob.grid_extent/prob.grid_resolution));
+    #Initialize to max size
+    costmap = zeros(n,n,n)+costOfEmptyCell;
+    #Create Objects
+    for i = 1:obstacles
+        #Random object centers 
+        index1 = round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
+        index2 = round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
+        #Loop through and create
+        for l = 1:size(costmap,1)
+            for p = 1:size(costmap,2)
+                costmap[l,p,1] += 500/(sqrt((l-index1)^2+(p-index2)^2));
+                if(costmap[l,p,1]>255)
+                    costmap[l,p,1] = 255;
+                end
+            end
+        end
+    end
+    return costmap;
+end
+
+## debugPlotDash
+#Description - plots the path and various derivative magnitudes as dashes with no background and can be used even if out of bounds
+#Inputs
+# sol - PathSol object with:
+#   totTime::Float64            # Total time of the polynomial path in seconds
+#   coeffs::Array{Float64,2}    # X, Y, Z, and Yaw coefficients
+# prob - PathProblem object with:
+#   isDim3::Bool                # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
+# tuning - TuningParams object with:
+#   timeRes::Int64              # How many points for determining limits and constraints
+#Outputs
+# Plots... with labels son! Aight! Cool...
+function debugPlotDash(sol, prob, tuning)
+    #Create times according to resolution
+    plotTimes = linspace(0,sol.totTime,tuning.timeRes)
+    #First figure is position
+    figure(1)
+    if(prob.isDim3)
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
+                evaluate_poly(sol.coeffs[3,:],0,plotTimes), #z
+                linestyle = "--");
+        #Extra label for 3D: rad!
+        zlabel("Z (m)")
+    else
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y 
+                linestyle = "--");
+    end
+    #Labels Homeboi!
+    title("Position")
+    xlabel("X (m)")
+    ylabel("Y (m)")
+    #Titles and ylabels for reference in the for loop boi!
+    titles = ["Velocity Magnitude", "Acceleration Magnitude", "Jerk Magnitude"]
+    ylabels = ["Velocity Magnitude (m/s)", "Acceleration Magnitude(m/s^2)", "Jerk Magnitude (m/s^3)"]
+    for i =1:3
+        figure(i+1)
+        if(prob.isDim3)
+            #Various derivatives are sqaured summed and sqrt'ed
+            plot(   plotTimes, sqrt(evaluate_poly(sol.coeffs[1,:],i,plotTimes).^2 + #x
+                                    evaluate_poly(sol.coeffs[2,:],i,plotTimes).^2 + #y
+                                    evaluate_poly(sol.coeffs[3,:],i,plotTimes).^2), #z
+                                    linestyle = "--");
+        else
+            plot(   plotTimes, sqrt(evaluate_poly(sol.coeffs[1,:],i,plotTimes).^2 + #x
+                                    evaluate_poly(sol.coeffs[2,:],i,plotTimes).^2), #y
+                                    linestyle = "--");
         end
         title(titles[i])
         ylabel(ylabels[i])

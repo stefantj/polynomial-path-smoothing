@@ -1,5 +1,6 @@
 using PyPlot # So plots can be used
 using JuMP   # Setup using JuMP so that we have access to its methods
+using Optim  # For optim.jl use
 
 #Classes/Objects without the functions
 #Convention Notes: 
@@ -30,7 +31,7 @@ type PathProblem                     # The parameters that define the problem
     PconstraintSoft::Array{Float64,2}# Soft constraints ordered by ascending order
     isDim3::Bool                     # The flag for 3D; 2 will be added later so the dimension is only 2 or 3
     dof::Int64                       # The extra degrees that would be completely free to optimize over
-    costmap::Array{Int8,3}           # The 3D voxel occupancy grid
+    costmap::Array{Float64,3}        # The 3D voxel occupancy grid
     grid_extent::Float64             # The extent of the cost map in meters
     grid_resolution::Float64         # The resolution of the cost map in meters
     Pgrid_elementNum::Int64          # The max index of the grid of the cost map
@@ -55,6 +56,9 @@ type TuningParams                      # All the knobs to turn for tuning
     numberOfRandomRestarts::Int64      # Number of random restarts to do before giving up
     timeWeight::Float64                # Weight applied to time
     timeRes::Int64                     # How many points for determining limits and constraints
+    precisionVel::Float64              # Precision in all derivatives that it is okay to be over limits by
+    percentAcc::Float64                # The decimal percent by which to bias the path to accelerate at
+    accelWeight::Float64               # Weight on acceleration term to bias path to accelerate near that
 end
 
 
@@ -468,8 +472,8 @@ function runPathPlanner(tuning::TuningParams,
     solvHelp = PolyPathSolver(  [0.0]'', #PA_inv::Array{Float64,2}           
                             [0.0]'', #    PQ::Array{Float64,2}              
                             [0.0]'', #    PoptimizeMatrix::Array{Float64,2}  
-                            false,   #    PoutOfBounds::Bool                 
-                            false,   #    PunVerified::Bool                
+                            true,    #    PoutOfBounds::Bool                 
+                            true,    #    PunVerified::Bool                
                             10,      #    counterRestart::Int64             
                             100);    #    counterVerified::Int64 
     #If dijkstras Create a normalized direction vector
@@ -480,27 +484,47 @@ function runPathPlanner(tuning::TuningParams,
     #TODO: make void functions with pointers to avoid so much copying
     prob = constructConstr(prob)
 
-    #initialize time and while loop until verified #increment time?
-    solution.totTime = 7.0;
+    
+    #initialize time to a reasonable time so polynomial doesn't explode, a reasonable time will be
+    solution.totTime = initializeTime(prob, tuning);
 
-    #Form A_inv
-    solvHelp.PA_inv = constr_Ainv(  prob.PconstraintOrders,
-                                    prob.PtimeIndex*solution.totTime, #Multiply by the total time for proper function
-                                    prob.Pdegree);
+    #while loop until verified 
+    while(solvHelp.PunVerified)
+        #Increment time on every loop
+        solution.totTime += tuning.timeIncrease;
 
-    #Add/subtract stuff to/from q_coeff if not equal to the degree
-    tuning.q_coeff = checkQcoeffs(tuning.q_coeff, prob.Pdegree)
-    #Form Q
-    solvHelp.PQ = form_Q(tuning.q_coeff,solution.totTime);
+        #Form A_inv
+        solvHelp.PA_inv = constr_Ainv(  prob.PconstraintOrders,
+                                        prob.PtimeIndex*solution.totTime, #Multiply by the total time for proper function
+                                        prob.Pdegree);
 
-    #Form OptimizeMat
-    solvHelp.PoptimizeMatrix = form_OptimizeMat(prob,tuning,solvHelp);
+        #Add/subtract stuff to/from q_coeff if not equal to the degree
+        tuning.q_coeff = checkQcoeffs(tuning.q_coeff, prob.Pdegree)
+        #Form Q
+        solvHelp.PQ = form_Q(tuning.q_coeff,solution.totTime);
 
-    #update the free constraints as necessary
-    prob.PconstrFree = updateFreeConstr(prob,solvHelp);
-    #8)SOLVE for the polynomial coefficients
-    solution.coeffs = solvePolysInitially(prob,solvHelp);
+        #Form OptimizeMat
+        solvHelp.PoptimizeMatrix = form_OptimizeMat(prob,tuning,solvHelp);
 
+        #update the free constraints as necessary
+        prob.PconstrFree = updateFreeConstr(prob,solvHelp);
+        #8)SOLVE for the polynomial coefficients
+        solution.coeffs = solvePolysInitially(prob,solvHelp);
+
+        #Check in bounds and collect the cells
+        solution.cells, solvHelp.PoutOfBounds = occupancyCellChecker(solution, prob, tuning);
+
+        #Verify good path
+        errorVals, errorTypes = simpleVerifyFeas(solution, tuning)
+
+        #If not verified increment time
+        if(!isempty(errorVals))
+            #Repeat loop over
+            continue; 
+        end
+        #If verified do not say verified  until next verify
+        solvHelp.PunVerified = false;
+    end
     #Just a stub for now
     return solution;
 
