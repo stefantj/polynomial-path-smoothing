@@ -699,7 +699,7 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
     tuning.softConstrWeights = checkQcoeffs(tuning.softConstrWeights, size(prob.PconstraintSoft,2))
     for i = 1:dim
         for j = 0:size(prob.PconstraintSoft,2)-1
-            softCosts += (d[i,end-j]-prob.PconstraintSoft[i,end-j])^2 * tuning.softConstrWeights[j+1];
+            softCosts += (d[i,end-j]-prob.PconstraintSoft[i,end-j])^2 * tuning.softConstrWeights[end-j];
         end
     end
     
@@ -896,5 +896,74 @@ function createRandomRestart(prob, tuning)
     return randConstrFree;
 end
 
-
-
+## pathCellPlot
+#Description - for the solution, the path is plotted and the cells it goes through set to 255 to be highlighted on a
+# plot with the costmap
+#Assumption
+# Cells are within the costmap
+# The path is final
+# Costmap is 2D
+#Inputs
+# prob - a PathProblem with:
+#   costmap::Array{Float64,3}        # The 3D voxel occupancy grid
+#   grid_extent::Float64             # The extent of the cost map in meters
+# sol - a PathSol with:
+#   totTime::Float64            # Total time of the polynomial path in seconds
+#   coeffs::Array{Float64,2}    # X, Y, Z, and Yaw coefficients
+#   cells::Array{Int64,1}       # The indices of the costmap that the path goes through
+# tuning - TuningParams with
+#   timeRes::Int64                     # How many points for determining limits and constraints
+#Outputs
+# Plot of the cost map, the path, and the highlighted cells
+function pathCellPlot(prob, sol, tuning)
+    #Create times according to resolution
+    plotTimes = linspace(0,sol.totTime,tuning.timeRes)
+    #Read in costmap
+    costmap = prob.costmap;
+    #Create this figure in figure 5
+    figure(5)
+    subplot(1,2,1)
+    imshow( flipCostmap(costmap),
+            cmap = "gray", 
+            interpolation="none",
+            extent=[0,prob.grid_extent,0,prob.grid_extent])
+    if(prob.isDim3)
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
+                evaluate_poly(sol.coeffs[3,:],0,plotTimes));#z
+        #Extra label for 3D: rad!
+        zlabel("Z (m)")
+    else
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes));#y 
+    end
+    #Labels Homeboi!
+    title("Final Path")
+    xlabel("X (m)")
+    ylabel("Y (m)")
+    subplot(1,2,2)
+    #Add the cells to the costmap! whooo!
+    for i in sol.cells
+        costmap[i]=255;
+    end
+    #Repeat the above
+    imshow( flipCostmap(costmap),
+            cmap = "gray", 
+            interpolation="none",
+            extent=[0,prob.grid_extent,0,prob.grid_extent])
+    if(prob.isDim3)
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
+                evaluate_poly(sol.coeffs[3,:],0,plotTimes));#z
+        #Extra label for 3D: rad!
+        zlabel("Z (m)")
+    else
+        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+                evaluate_poly(sol.coeffs[2,:],0,plotTimes));#y 
+    end
+    #Labels Homeboi!
+    title("Final Path with Cells")
+    xlabel("X (m)")
+    ylabel("Y (m)")
+    subplot(1,2,2)
+end
