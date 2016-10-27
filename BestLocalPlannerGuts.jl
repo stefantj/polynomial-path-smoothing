@@ -705,7 +705,19 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
     
     #Create costmap costs
     #Note that the mapCost with a cell travel cost of 50 is on the order of 1000s
-    mapCost = tuning.obstacleWeight*sum(prob.costmap[sol.cells]);
+    mapCost = 0;
+    for  i in timesCheck
+        if(prob.isDim3)
+            mapCost += prob.costmap[round(Int64,evaluate_poly(p[:,1],0,1)/prob.grid_resolution),
+                    round(Int64,evaluate_poly(p[:,2],0,i)/prob.grid_resolution),
+                    round(Int64,evaluate_poly(p[:,3],0,i)/prob.grid_resolution)];
+        else
+            mapCost += prob.costmap[round(Int64,evaluate_poly(p[:,1],0,1)/prob.grid_resolution),
+                round(Int64,ceil(evaluate_poly(p[:,2],0,i)/prob.grid_resolution)+1),
+                    1];
+        end
+    end
+    mapCost *= tuning.obstacleWeight;
 
     #Return the total cost
     cost = derivCost + velCost + softCosts + mapCost+accelCost;
