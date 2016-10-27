@@ -844,3 +844,57 @@ function debugPlotDash(sol, prob, tuning)
         xlabel("Time (s)")
     end
 end
+
+## createRandomRestart
+#Description - creates random values for the free constraints to start at before and optimization after a path has run 
+# into an obstacle on the first pass
+#Assumptions
+# Max changes in derivatives are provided in tuning
+#Inputs
+# prob - a PathProblem with:
+#   PconstrFree::Array{Float64,2}    # A holder for all soft and free contraints
+#   PconstraintOrders::Array{Int64,1}# The order corresponding to each constraint in the total constriant vector
+# tuning - a TuningParams object with:
+#   max_vel::Float64                   # Max total velocity the path is restricted to
+#   max_accel::Float64                 # Max total acceleration the path is restricted to
+#   max_jerk::Float64                  # Max total jerk the path is restricted to
+#Outputs
+# randConstrFree - an updated PconstrFree
+function createRandomRestart(prob, tuning)
+    #TODO: put in tuning understand and how objects are passed in Julia
+    #Create max values to add for position
+    posMax = 0.25;
+    #Create a dimension variable
+    dim = 2+ prob.isDim3;
+    #Initialize 
+    randConstrFree = prob.PconstrFree;
+    #Loop throught the row of randConstrFree
+    for i = 1:size(randConstrFree,1);
+        #Loop through each constraint order
+        for j = 1:size(prob.PconstrFree,2)
+            #if statements for what value to put in
+            if(prob.PconstraintOrders[j+size(prob.PconstrFixed,2)] == 0)
+                #For position points
+                #max value to add, times 2, make rand() -0.5 to 0.5 and add the position that is desired
+                randConstrFree[i,j] = posMax*2*(0.5-rand())+prob.PconstrFree[i,j]
+            elseif(prob.PconstraintOrders[j+size(prob.PconstrFixed,2)]==1)
+                #For vel points
+                #max value to add, times 2, divide by dimensions, make rand() -0.5 to 0.5
+                randConstrFree[i,j] = tuning.max_vel*2/dim*(0.5-rand());
+            elseif(prob.PconstraintOrders[j+size(prob.PconstrFixed,2)]==2)
+                #For accel points
+                #max value to add, times 2,divide by dimensions, make rand() -0.5 to 0.5
+                randConstrFree[i,j] = tuning.max_accel*2/dim*(0.5-rand());
+            else
+                #For everything else
+                #max value to add, times 2,divide by dimensions, make rand() -0.5 to 0.5
+                randConstrFree[i,j] = tuning.max_jerk*2/dim*(0.5-rand());
+            end
+        end
+    end
+
+    return randConstrFree;
+end
+
+
+
