@@ -967,3 +967,136 @@ function pathCellPlot(prob, sol, tuning)
     ylabel("Y (m)")
     subplot(1,2,2)
 end
+
+## selfGradientDescent
+#Description - conduct a gradient descent optimization over the free constraints of a PathProblem for a 
+# set amount of iterations
+#Assumptions
+# All constraints are perturbed the same amount
+#Input
+# sol - a PathSol with:
+#   totTime::Float64            # Total time of the polynomial path in seconds
+#   coeffs::Array{Float64,2}    # X, Y, Z, and Yaw coefficients
+#   cells::Array{Int64,1}       # The indices of the costmap that the path goes through
+#   cost::Float64               # The total cost of the path
+# prob - the PathProblem with the free constraints to be:
+#   PconstrFree::Array{Float64,2}    # A holder for all soft and free contraints
+# tuning - the TuningParams object with the following for this portion:
+#   precision::Float64                 # The tolerance to solve within
+#   iterations::Int64                  # Number of times to do optimization step
+#   perturbation::Float64              # How much to start out changing free variables by
+# solvOpt - a PolyPathSolver object with everything
+#Output
+# soln - the optimized PathSol object
+# PconstrFree - the optimizing free constraints
+# outOfBounds - a flag of whether the path went out of bounds or not
+function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams,solvOpt::PolyPathSolver)
+    #Start optimization as unoptimized
+    #Create a copy of the problem
+    oldCost = sol.cost;
+    soln = sol;
+    probOpt = prob;
+    perturb = tuning.perturbation;
+    outOfBounds = false;
+    rowFree = size(prob.PconstrFree,1);
+    colFree = size(prob.PconstrFree,2);
+    counter = 0;
+    rateChange = zeros(rowFree*colFree);
+
+    while(counter<tuning.iterations)
+        println(perturb)
+        #Start while?
+        #For each free variable perturb by an amount
+        for i = 1:rowFree
+            for j = 1:colFree
+                #Hold the pre perturbed stuff
+                #Perturb specific free variable the amount
+                probOpt.PconstrFree[i,j] += perturb;
+
+                #solve for the polynomial coefficients
+                coeffs = solvePolysInitially(probOpt,solvOpt);
+
+                #Check in bounds and collect the cells
+                soln.cells, outOfBounds = occupancyCellChecker(soln, probOpt, tuning);
+
+                #Break if out of bounds and display an error
+                if(outOfBounds)
+                    println("Plan Fail: Went out of Bounds")
+                    #Add a return here
+                    return soln, probOpt.PconstrFree, outOfBounds;
+                end
+
+                #Create a holder for the free constr
+                dF = form_df(probOpt);
+
+                #Calculate the costs
+                costNew = costFunc(dF, soln, probOpt, solvOpt, tuning)
+
+                #Record the change in cost
+                rateChange[(i-1)*colFree+j] = (costNew-oldCost)/perturb;
+
+                #Reset the free constraint so it doesn't affect other ones
+                probOpt.PconstrFree[i,j] -= perturb
+            end    
+        end
+
+        #Normalize the rat of change vector
+        gradDir = normalize!(rateChange)
+
+        #Perturb in the negative gradient direction
+        for i = 1:rowFree
+            for j = 1:colFree
+                #Perturb in the negative gradient direction
+                probOpt.PconstrFree[i,j] += perturb*-gradDir[(i-1)*colFree+j];
+            end    
+        end
+
+        #solve for the polynomial coefficients
+        coeffs = solvePolysInitially(probOpt,solvOpt);
+
+        #Check in bounds and collect the cells
+        soln.cells, outOfBounds = occupancyCellChecker(soln, probOpt, tuning);
+
+        #Break if out of bounds and display an error
+        if(outOfBounds)
+            println("Plan Fail: Went out of Bounds")
+            #Add a return here
+            return soln, probOpt.PconstrFree, outOfBounds;
+        end
+
+        #Create a holder for the free constr
+        dF = form_df(probOpt);
+
+        #Calculate the costs
+        costNew = costFunc(dF, soln, probOpt, solvOpt, tuning)
+
+        #Check if step is too small or if change is too small and break if within precision
+        if(all(abs(gradDir*perturb) .< tuning.precision) || abs(costNew - oldCost) < tuning.precision)
+            #Exit optimization with a return
+            return soln, probOpt.PconstrFree, outOfBounds;
+        elseif(costNew - oldCost < 0)
+            #If step was a decrease step keep that and increase step size
+            perturb *= 2;
+            #Update cost
+            oldCost = costNew;
+            println(oldCost)
+        else
+            #If step was an increase revert the step and half the step size
+            for i = 1:rowFree
+                for j = 1:colFree
+                    #Reverse perturb in the negative gradient direction
+                    probOpt.PconstrFree[i,j] -= perturb*-gradDir[(i-1)*colFree+j];
+                end    
+            end
+            perturb /= 2;
+        end
+        #Update counter
+        counter += 1;
+    end
+
+    #If made it here went past all the iterations
+    println("Optimization went through all the iterations")
+
+    #Return the solution the updated free constraints and the out of bounds flag
+    return soln, probOpt.PconstrFree, outOfBounds;
+end

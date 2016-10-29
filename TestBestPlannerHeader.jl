@@ -1,6 +1,7 @@
 using PyPlot # So plots can be used
 using JuMP   # Setup using JuMP so that we have access to its methods
 using Optim  # For optim.jl use
+using Convex # For convex.jl.....hopefully it works
 
 #Classes/Objects without the functions
 #Convention Notes: 
@@ -59,6 +60,7 @@ type TuningParams                      # All the knobs to turn for tuning
     precisionVel::Float64              # Precision in all derivatives that it is okay to be over limits by
     percentAcc::Float64                # The decimal percent by which to bias the path to accelerate at
     accelWeight::Float64               # Weight on acceleration term to bias path to accelerate near that
+    perturbation::Float64              # How much to start out changing free variables by
 end
 
 
