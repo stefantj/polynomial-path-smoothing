@@ -542,33 +542,13 @@ function runPathPlanner(tuning::TuningParams,
         
         #Create a holder for the free constr
         df = form_df(prob);
+        
+        #Calculate the initial cost
+        solution.cost = costFunc(df, solution, prob, solvHelp, tuning)
 
         #optimize free constraints with limits built in using the COST function
-        #Do one iteration solve next iteration repeat
-        for i = 1:tuningI.iterations
-            result = optimize(x -> costFunc(x, solution, prob, solvHelp, tuning), df,
-                                            GradientDescent(),
-                                            OptimizationOptions(iterations = 1));
-
-            #Save the result of the optimization
-            df = Optim.minimizer(result)
-
-            #Resolve df into the respective free constraints and solve again
-            prob.PconstrFree = decompose_df(df, prob);
-
-            #solve for the polynomial coefficients
-            solution.coeffs = solvePolysInitially(prob,solvHelp);
-
-            #Check in bounds and collect the cells
-            solution.cells, solvHelp.PoutOfBounds = occupancyCellChecker(solution, prob, tuning);
-        end
-
-
-        #Break if out of bounds and display an error
-        if(solvHelp.PoutOfBounds)
-            println("Plan Fail: Went out of Bounds")
-            break;
-        end
+        solution, problem.PconstrFree, solvHelp.PoutOfBounds = 
+            selfGradientDescent(solution,prob,tuning,solvHelp);
 
         #Verify good path Number 2
         errorVals, errorTypes = simpleVerifyFeas(solution, tuning)
@@ -586,40 +566,58 @@ function runPathPlanner(tuning::TuningParams,
 
     #Start random restarts if hitting an obstacle
     restartCounter = 0;
-    while(any(prob.costmap[solution.cells] .>= 255) && restartCounter < tuning.numberOfRandomRestarts)
-
+    while((any(prob.costmap[solution.cells] .>= FATAL_OBJECT) || solvHelp.PunVerified) && 
+        restartCounter < tuning.numberOfRandomRestarts)
         #Print message about hitting an obstacle and random restarting
-        println("Hit and Obstacle; Trying a random restart")
-
+        if(any(prob.costmap[solution.cells] .>= FATAL_OBJECT))
+            println("Hit and Obstacle; Trying a random restart $(restartCounter+1)")
+        end
+        if(solvHelp.PunVerified)
+            println("Broke limits; Trying random restart $(restartCounter+1)")
+        end
         #Create random start
         prob.PconstrFree = createRandomRestart(prob, tuning);
+        #solve for the polynomial coefficients
+        solution.coeffs = solvePolysInitially(prob,solvHelp);
 
-        #optimize - note there is no verification step anymore so no more increasing time this could cause problems
-        # later
+        #Check in bounds and collect the cells
+        solution.cells, solvHelp.PoutOfBounds = occupancyCellChecker(solution, prob, tuning);
+
+        #Break if out of bounds and display an error
+        if(solvHelp.PoutOfBounds)
+            println("Plan Fail: Went out of Bounds In the Initial Restart")
+            #break;
+        end
+
+        #optimize -Note there is no verification step anymore so no more increasing time
         #Create a holder for the free constr
         df = form_df(prob);
 
+        #Calculate the initial cost
+        solution.cost = costFunc(df, solution, prob, solvHelp, tuning)
         #1)OPTIMIZE free constraints with limits built in; 2)COST function
-        #Do one iteration solve next iteration repeat
-        for i = 1:tuning.iterations
-            result = optimize(x -> costFunc(x, solution, prob, solvHelp, tuning), df,
-                                            GradientDescent(),
-                                            OptimizationOptions(iterations = 1));
+        println("cost before: ", costFunc(df, solution, prob, solvHelp, tuning))
 
-            #Save the result of the optimization
-            df = Optim.minimizer(result)
+        #optimize free constraints with limits built in using the COST function
+        solution, prob.PconstrFree, solvHelp.PoutOfBounds = 
+            selfGradientDescent(solution,prob,tuning,solvHelp);
+        df = form_df(prob);
+        println("cost after: ", costFunc(df, solution, prob, solvHelp, tuning))
 
-            #Resolve df into the respective free constraints and solve again
-            prob.PconstrFree = decompose_df(df, prob);
-
-            #solve for the polynomial coefficients
-            solution.coeffs = solvePolysInitially(prob,solvHelp);
-
-            #Check in bounds and collect the cells
-            solution.cells, solvHelp.PoutOfBounds = occupancyCellChecker(solution, prob, tuning);
+        #If no collision verify
+        if(!(any(prob.costmap[solution.cells] .>= 255)))
+            #Verify good path
+            errorVals, errorTypes = simpleVerifyFeas(solution, tuning)
+            #Check if verified, if not verified make it so that the loop happens again
+            if(isempty(errorVals))
+                #Repeat loop over
+                solvHelp.PunVerified = false;
+            else
+                #Would repeat loop over if other things are tur
+                solvHelp.PunVerified = true;
+            end
         end
 
-        #Increment the counter
         restartCounter += 1; 
     end
 

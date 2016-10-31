@@ -684,7 +684,9 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
                                 evaluate_poly(p[3,:],2,timesCheck ).^2)- # z
                                 tuning.max_accel*tuning.percentAcc).^2); # minus the max_vel and square
     else
-        accelCost = 0;
+        accelCost = sum((sqrt(  evaluate_poly(p[1,:],2,timesCheck).^2  +  # x
+                                evaluate_poly(p[2,:],2,timesCheck ).^2)));  # y
+
     end
     #Add a cost for being above
     temp = sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + evaluate_poly(p[2,:],2,timesCheck).^2)
@@ -884,7 +886,7 @@ function createRandomRestart(prob, tuning)
             elseif(prob.PconstraintOrders[j+size(prob.PconstrFixed,2)]==2)
                 #For accel points
                 #max value to add, times 2,divide by dimensions, make rand() -0.5 to 0.5
-                randConstrFree[i,j] = tuning.max_accel*2/dim*(0.5-rand());
+                randConstrFree[i,j] = 0.1*2/dim*(0.5-rand());
             else
                 #For everything else
                 #max value to add, times 2,divide by dimensions, make rand() -0.5 to 0.5
