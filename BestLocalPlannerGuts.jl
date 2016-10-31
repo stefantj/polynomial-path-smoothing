@@ -684,9 +684,7 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
                                 evaluate_poly(p[3,:],2,timesCheck ).^2)- # z
                                 tuning.max_accel*tuning.percentAcc).^2); # minus the max_vel and square
     else
-        accelCost = sum((sqrt(  evaluate_poly(p[1,:],2,timesCheck).^2  +  # x
-                                evaluate_poly(p[2,:],2,timesCheck ).^2)));  # y
-
+        accelCost = 0;
     end
     #Add a cost for being above
     temp = sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + evaluate_poly(p[2,:],2,timesCheck).^2)
@@ -776,8 +774,8 @@ function createCostMap(obstacles::Int64,prob::PathProblem)
     #Create Objects
     for i = 1:obstacles
         #Random object centers 
-        index1 = round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
-        index2 = round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
+        index1 = round(rand()*n)#round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
+        index2 = round(rand()*n) #round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
         #Loop through and create
         for l = 1:size(costmap,1)
             for p = 1:size(costmap,2)
@@ -863,9 +861,6 @@ end
 #Outputs
 # randConstrFree - an updated PconstrFree
 function createRandomRestart(prob, tuning)
-    #TODO: put in tuning understand and how objects are passed in Julia
-    #Create max values to add for position
-    posMax = 0.25;
     #Create a dimension variable
     dim = 2+ prob.isDim3;
     #Initialize 
@@ -878,19 +873,19 @@ function createRandomRestart(prob, tuning)
             if(prob.PconstraintOrders[j+size(prob.PconstrFixed,2)] == 0)
                 #For position points
                 #max value to add, times 2, make rand() -0.5 to 0.5 and add the position that is desired
-                randConstrFree[i,j] = posMax*2*(0.5-rand())+prob.PconstrFree[i,j]
+                randConstrFree[i,j] = tuning.posMaxAdd*2*(0.5-rand())+prob.PconstrFree[i,j]
             elseif(prob.PconstraintOrders[j+size(prob.PconstrFixed,2)]==1)
                 #For vel points
                 #max value to add, times 2, divide by dimensions, make rand() -0.5 to 0.5
-                randConstrFree[i,j] = tuning.max_vel*2/dim*(0.5-rand());
+                randConstrFree[i,j] = tuning.velMaxAdd*2*(0.5-rand())+prob.PconstrFree[i,j]#tuning.max_vel*2/dim*(0.5-rand());
             elseif(prob.PconstraintOrders[j+size(prob.PconstrFixed,2)]==2)
                 #For accel points
                 #max value to add, times 2,divide by dimensions, make rand() -0.5 to 0.5
-                randConstrFree[i,j] = 0.1*2/dim*(0.5-rand());
+                randConstrFree[i,j] = tuning.accelMaxAdd*2*(0.5-rand())+prob.PconstrFree[i,j]#tuning.max_accel*2/dim*(0.5-rand());
             else
                 #For everything else
                 #max value to add, times 2,divide by dimensions, make rand() -0.5 to 0.5
-                randConstrFree[i,j] = tuning.max_jerk*2/dim*(0.5-rand());
+                randConstrFree[i,j] = tuning.jerkMaxAdd*2*(0.5-rand())+prob.PconstrFree[i,j]#tuning.max_jerk*2/dim*(0.5-rand());
             end
         end
     end

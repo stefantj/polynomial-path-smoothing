@@ -61,6 +61,10 @@ type TuningParams                      # All the knobs to turn for tuning
     percentAcc::Float64                # The decimal percent by which to bias the path to accelerate at
     accelWeight::Float64               # Weight on acceleration term to bias path to accelerate near that
     perturbation::Float64              # How much to start out changing free variables by
+    posMaxAdd::Float64                 # Max amount to add to a position value in random restart
+    velMaxAdd::Float64                 # Max amount to add to a velocity value in random restart
+    accelMaxAdd::Float64               # Max amount to add to a accel value in random restart
+    jerkMaxAdd::Float64                # Max amount to add to a jerk value in random restart
 end
 
 
@@ -563,7 +567,8 @@ function runPathPlanner(tuning::TuningParams,
         #end while loop
     end
 
-
+    #create a holder to prevent overwriting
+    freeConstrFirst = prob.PconstrFree;
     #Start random restarts if hitting an obstacle
     restartCounter = 0;
     while((any(prob.costmap[solution.cells] .>= FATAL_OBJECT) || solvHelp.PunVerified) && 
@@ -617,7 +622,7 @@ function runPathPlanner(tuning::TuningParams,
                 solvHelp.PunVerified = true;
             end
         end
-
+        prob.PconstrFree = freeConstrFirst;
         restartCounter += 1; 
     end
 
