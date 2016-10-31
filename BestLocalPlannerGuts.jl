@@ -92,7 +92,7 @@ function addDirectedSpeed!(prob::PathProblem, max_vel)
     for i = 1:(2+prob.isDim3)
         max_vel_vec = [max_vel_vec; (prob.end_config[i,1] - prob.start_config[i,1])];
     end
-    #Maxsure that if max_vel_vec is zero you do not get NAN
+    #Make sure that if max_vel_vec is zero you do not get NAN
     if(max_vel_vec != zeros(2+prob.isDim3))
         max_vel_vec = normalize!(max_vel_vec)*max_vel
     end
