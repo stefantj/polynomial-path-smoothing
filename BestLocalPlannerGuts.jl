@@ -994,7 +994,7 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
     #Start optimization as unoptimized
     #Create a copy of the problem
     oldCost = sol.cost;
-    soln = sol;
+    soln = PathSol(sol.totTime, sol.coeffs, sol.cells, sol.cost);
     probOpt = prob;
     perturb = tuning.perturbation;
     outOfBounds = false;
@@ -1004,7 +1004,6 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
     rateChange = zeros(rowFree*colFree);
 
     while(counter<tuning.iterations)
-        println(perturb)
         #Start while?
         #For each free variable perturb by an amount
         for i = 1:rowFree
@@ -1014,16 +1013,16 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
                 probOpt.PconstrFree[i,j] += perturb;
 
                 #solve for the polynomial coefficients
-                coeffs = solvePolysInitially(probOpt,solvOpt);
+                soln.coeffs = solvePolysInitially(probOpt,solvOpt);
 
                 #Check in bounds and collect the cells
                 soln.cells, outOfBounds = occupancyCellChecker(soln, probOpt, tuning);
 
                 #Break if out of bounds and display an error
                 if(outOfBounds)
-                    println("Plan Fail: Went out of Bounds")
+                    println("Plan Fail: Went out of Bounds in First Optimize Step")
                     #Add a return here
-                    return soln, probOpt.PconstrFree, outOfBounds;
+                    #return (PathSol(soln.totTime, soln.coeffs, soln.cells, soln.cost), probOpt.PconstrFree, outOfBounds);
                 end
 
                 #Create a holder for the free constr
@@ -1052,16 +1051,16 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
         end
 
         #solve for the polynomial coefficients
-        coeffs = solvePolysInitially(probOpt,solvOpt);
+        soln.coeffs = solvePolysInitially(probOpt,solvOpt);
 
         #Check in bounds and collect the cells
         soln.cells, outOfBounds = occupancyCellChecker(soln, probOpt, tuning);
 
         #Break if out of bounds and display an error
         if(outOfBounds)
-            println("Plan Fail: Went out of Bounds")
+            println("Plan Fail: Went out of Bounds In Optimization")
             #Add a return here
-            return soln, probOpt.PconstrFree, outOfBounds;
+            #return (PathSol(soln.totTime, soln.coeffs, soln.cells, soln.cost), probOpt.PconstrFree, outOfBounds);
         end
 
         #Create a holder for the free constr
@@ -1073,13 +1072,13 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
         #Check if step is too small or if change is too small and break if within precision
         if(all(abs(gradDir*perturb) .< tuning.precision) || abs(costNew - oldCost) < tuning.precision)
             #Exit optimization with a return
-            return soln, probOpt.PconstrFree, outOfBounds;
+            return (PathSol(soln.totTime, soln.coeffs, soln.cells, soln.cost), probOpt.PconstrFree, outOfBounds);
         elseif(costNew - oldCost < 0)
             #If step was a decrease step keep that and increase step size
             perturb *= 2;
             #Update cost
             oldCost = costNew;
-            println(oldCost)
+            soln.cost = oldCost;
         else
             #If step was an increase revert the step and half the step size
             for i = 1:rowFree
@@ -1096,7 +1095,7 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
 
     #If made it here went past all the iterations
     println("Optimization went through all the iterations")
-
+    
     #Return the solution the updated free constraints and the out of bounds flag
-    return soln, probOpt.PconstrFree, outOfBounds;
+    return (PathSol(soln.totTime, soln.coeffs, soln.cells, soln.cost), probOpt.PconstrFree, outOfBounds);
 end
