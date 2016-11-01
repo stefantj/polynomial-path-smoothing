@@ -775,8 +775,8 @@ function createCostMap(obstacles::Int64,prob::PathProblem)
     #Create Objects
     for i = 1:obstacles
         #Random object centers 
-        index1 = round(rand()*n)#round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
-        index2 = round(rand()*n) #round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
+        index1 = round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
+        index2 = round(Int64,ceil(3/prob.grid_resolution))#round(rand()*n);
         #Loop through and create
         for l = 1:size(costmap,1)
             for p = 1:size(costmap,2)

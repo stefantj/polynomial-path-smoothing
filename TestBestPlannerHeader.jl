@@ -544,6 +544,13 @@ function runPathPlanner(tuning::TuningParams,
         end
         #If verified do not say verified  until next verify
         
+        #Check if not hitting an obstacle since if it is it will not succeed.
+        if(any(problem.costmap[solution.cells].>=FATAL_OBJECT))
+            #Break and go to random restarts
+            println("Hit Object")
+            break;
+        end
+        
         #Create a holder for the free constr
         df = form_df(prob);
         
@@ -590,7 +597,7 @@ function runPathPlanner(tuning::TuningParams,
 
         #Break if out of bounds and display an error
         if(solvHelp.PoutOfBounds)
-            println("Plan Fail: Went out of Bounds In the Initial Restart")
+            println("Plan Fail: Went out of Bounds In the Initial Optimization")
             #break;
         end
 
