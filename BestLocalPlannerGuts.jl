@@ -444,6 +444,7 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
     end
     #Check the final point just in case based on passed dimension
     #println("final point")
+
     if(dim == 3)
         occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
                                                          evaluate_poly(coeffMat[2,:],0,timeFin),
@@ -999,7 +1000,6 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
     colFree = size(prob.PconstrFree,2);
     counter = 0;
     rateChange = zeros(rowFree*colFree);
-
     while(counter<tuning.iterations)
         #Start while?
         #For each free variable perturb by an amount
@@ -1027,7 +1027,7 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
 
                 #Calculate the costs
                 costNew = costFunc(dF, soln, probOpt, solvOpt, tuning)
-
+                
                 #Record the change in cost
                 rateChange[(i-1)*colFree+j] = (costNew-oldCost)/perturb;
 
@@ -1035,7 +1035,8 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
                 probOpt.PconstrFree[i,j] -= perturb
             end    
         end
-
+        
+        #if(ratechange)
         #Normalize the rat of change vector
         gradDir = normalize!(rateChange)
 
@@ -1049,7 +1050,7 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
 
         #solve for the polynomial coefficients
         soln.coeffs = solvePolysInitially(probOpt,solvOpt);
-
+        
         #Check in bounds and collect the cells
         soln.cells, outOfBounds = occupancyCellChecker(soln, probOpt, tuning);
 
@@ -1076,6 +1077,7 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
             #Update cost
             oldCost = costNew;
             soln.cost = oldCost;
+            
         else
             #If step was an increase revert the step and half the step size
             for i = 1:rowFree
