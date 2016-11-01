@@ -41,14 +41,20 @@ function constructConstr(prob::PathProblem)
     end
     #Subtract dofExtra and the number of soft constraints from the total degree to get the size of constrFixed
     #Create the fixed constraint vector
+
+## STEFAN: Changed some dimensions to what I think looks right. Double check though.
     constrFixed =  zeros(2+prob.isDim3,degree-length(softIndex)-prob.dof);
     for i = 1:(2+prob.isDim3)
-        constrFixed[i,:] = [prob.start_config[i,:]' prob.end_config[i,notSoftIndex]'];
+        if(size(notSoftIndex,1) > 0)
+            constrFixed[i,:] = [prob.start_config[i,:] prob.end_config[i,notSoftIndex]];
+        else
+            constrFixed[i,:] = [prob.start_config[i,:]];
+        end
     end
     #Create the free vector with soft constraints at the end
     constrFree =  zeros(2+prob.isDim3,length(softIndex)+prob.dof);
     for i = 1:(2+prob.isDim3)
-        constrFree[i,:] = [zeros(size(1:prob.dof))' constrSoft[i,:]']
+        constrFree[i,:] = [zeros(1,prob.dof) constrSoft[i,:]]
     end
     #Create the time index vector with assumption that all free variables are end derivatives
     timeIndex = ones(degree);
@@ -275,7 +281,8 @@ function updateFreeConstr(prob::PathProblem,solvStuff::PolyPathSolver)
         #Non soft constraints will have zeros
         addSofts[i,end-size(prob.PconstraintSoft,2)+1:end] = prob.PconstraintSoft[i,:];
         #The actual calculation is Opt_mat * d_f + d_softs
-        prob.PconstrFree[i,:] = solvStuff.PoptimizeMatrix * prob.PconstrFixed[i,:] + addSofts[i,:];
+### STEFAN: Changed dimensions to what I think looks right. Double check 
+        prob.PconstrFree[i,:] = prob.PconstrFixed[i,:]*solvStuff.PoptimizeMatrix'  + addSofts[i,:];
     end
     return prob.PconstrFree;
 end
@@ -301,8 +308,10 @@ function solvePolysInitially(prob1,solvStuff)
     coeffs = zeros(2+prob1.isDim3,prob1.Pdegree)
     #for each dimension
     for i = 1:(2+prob1.isDim3)
+println(size(solvStuff.PA_inv), size(prob1.PconstrFixed[i,:]'), size(prob1.PconstrFree[i,:]'));
+### STEFAN: Changed dimensions to what I think looks right. Double check 
         #p = A^-1 * d
-        coeffs[i,:] = solvStuff.PA_inv * [prob1.PconstrFixed[i,:]' prob1.PconstrFree[i,:]']';
+        coeffs[i,:] = (solvStuff.PA_inv * [prob1.PconstrFixed[i,:]'; prob1.PconstrFree[i,:]'])';
     end
     return coeffs;
 end
@@ -380,7 +389,8 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
     #Loop for 2 or 3 dimensions
     for looper = 1:dim
         #Create previous point vector
-        pts[looper] = evaluate_poly(coeffMat[looper,:],0,t);
+### STEFAN: Changed dimensions to what I think looks right. Double check 
+        pts[looper] = evaluate_poly(vec(coeffMat[looper,:]),0,t);
         #Create an initial dist that should be checked the first time 
         distInit = minimum( [mod(pts[looper],prob.grid_resolution),
                              prob.grid_resolution-mod(pts[looper],prob.grid_resolution)])
@@ -393,7 +403,7 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
         t_new = t;
         counter = 0;
         #Calculate the time at which the change in distance is more than our distance to travel
-        while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < distInit && counter < 1/timeStep)
+        while(abs(pts[looper] - evaluate_poly(vec(coeffMat[looper,:]),0,t_new)) < distInit && counter < 1/timeStep)
             #If we haven't gotten higher than what we want to travel increment the time
             t_new += timeStep;
             #println(t_new)
@@ -416,7 +426,7 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
         end
         #Find the x,y,z of the current time
         for looper = 1:dim
-            pts[looper] = evaluate_poly(coeffMat[looper, :], 0, t);
+            pts[looper] = evaluate_poly(vec(coeffMat[looper, :]), 0, t);
             #Check if in bounds if not leave the function early
             if(pts[looper] < 0 || pts[looper] > prob.grid_extent)
                 outOfBounds = true;
@@ -432,7 +442,7 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
                 t_new = t;
                 counter = 0;
                 #Calculate the time at which the change in distance is more than our distance to travel
-                while(abs(pts[looper] - evaluate_poly(coeffMat[looper,:],0,t_new)) < dist && counter < 1000)
+                while(abs(pts[looper] - evaluate_poly(vec(coeffMat[looper,:]),0,t_new)) < dist && counter < 1000)
                     #If we haven't gotten higher than what we want to travel increment the time
                     t_new += timeStep;
                     counter += 1;
@@ -446,12 +456,12 @@ function occupancyCellChecker(sol::PathSol, prob::PathProblem, tuning::TuningPar
     #println("final point")
 
     if(dim == 3)
-        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
-                                                         evaluate_poly(coeffMat[2,:],0,timeFin),
-                                                         evaluate_poly(coeffMat[3,:],0,timeFin), prob)];
+        occupancy_vec = [occupancy_vec; occupancy_get_id(vec(evaluate_poly(coeffMat[1,:]),0,timeFin),
+                                                         evaluate_poly(vec(coeffMat[2,:]),0,timeFin),
+                                                         evaluate_poly(vec(coeffMat[3,:]),0,timeFin), prob)];
     elseif(dim == 2)
-        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(coeffMat[1,:],0,timeFin),
-                                                         evaluate_poly(coeffMat[2,:],0,timeFin),
+        occupancy_vec = [occupancy_vec; occupancy_get_id(evaluate_poly(vec(coeffMat[1,:]),0,timeFin),
+                                                         evaluate_poly(vec(coeffMat[2,:]),0,timeFin),
                                                          0,prob)];
     end
     #Return the vector of unique occupancy grids (could be non unique)
@@ -516,7 +526,7 @@ function simpleVerifyFeas(sol::PathSol, tuning::TuningParams)
         totalSum = 0;
         for i = 1:dim
             #calculate the respective derivative
-            checkingMat[i,:] = evaluate_poly(sol.coeffs[i,:],j,t);
+            checkingMat[i,:] = evaluate_poly(vec(sol.coeffs[i,:]),j,t);
             #sum its square
             totalSum += checkingMat[i,:].^2;
         end
@@ -575,14 +585,14 @@ function debugPlot(sol, prob, tuning)
     #First figure is position
     figure(1)
     if(prob.isDim3)
-        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
-                evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
-                evaluate_poly(sol.coeffs[3,:],0,plotTimes)) #z
+        plot(   evaluate_poly(vec(sol.coeffs[1,:]),0,plotTimes), #x
+                evaluate_poly(vec(sol.coeffs[2,:]),0,plotTimes), #y
+                evaluate_poly(vec(sol.coeffs[3,:]),0,plotTimes)) #z
         #Extra label for 3D: rad!
         zlabel("Z (m)")
     else
-        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
-                evaluate_poly(sol.coeffs[2,:],0,plotTimes)) #y 
+        plot(   evaluate_poly(vec(sol.coeffs[1,:]),0,plotTimes), #x
+                evaluate_poly(vec(sol.coeffs[2,:]),0,plotTimes)) #y 
     end
     #Labels Homeboi!
     title("Position")
@@ -644,16 +654,17 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
     #Create a combined vector of fixed and free constraints and the resulting poly coefficients
     d = zeros(dim,prob.Pdegree)
     p = zeros(dim,prob.Pdegree)
+### STEFAN: Changed dimensions to what I think looks right. Double check 
     for i = 1:dim
-        d[i,:] = [prob.PconstrFixed[i,:]' dF[(1:size(prob.PconstrFree,2))+(i-1)*size(prob.PconstrFree,2)]'];
-        p[i,:] = solvStuff.PA_inv * d[i,:];
+        d[i,:] = [prob.PconstrFixed[i,:] dF[(1:size(prob.PconstrFree,2))+(i-1)*size(prob.PconstrFree,2)]'];
+        p[i,:] = solvStuff.PA_inv * (d[i,:]');
     end
     #Create the derivative cost
     derivCost = 0;
     for i = 1:dim
-        derivCost += (  p[i,:])' *      # p^T
+        derivCost += (  p[i,:]) *      # p^T
                         solvStuff.PQ *  # Q
-                       (p[i,:]);        # p
+                       (p[i,:]');        # p
     end
     #Divide by the number of derivative terms and then apply the weight
     #Note with a weight of 1 the cost is in the 100s
@@ -664,13 +675,13 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
     timesCheck = collect(linspace(0,sol.totTime,tuning.timeRes));
     #Sum the square errors in velocity magnitudes
     if(prob.isDim3)
-        velCost = sum((sqrt(evaluate_poly(p[1,:],1,timesCheck).^2 + # x
-                            evaluate_poly(p[2,:],1,timesCheck ).^2 + # y
-                            evaluate_poly(p[3,:],1,timesCheck ).^2)- # z
+        velCost = sum((sqrt(evaluate_poly(vec(p[1,:]),1,timesCheck).^2 + # x
+                            evaluate_poly(vec(p[2,:]),1,timesCheck ).^2 + # y
+                            evaluate_poly(vec(p[3,:]),1,timesCheck ).^2)- # z
                        tuning.max_vel).^2) ;                       # minus the max_vel and square
     else
-        velCost = sum((sqrt(evaluate_poly(p[1,:],1,timesCheck).^2 + # x
-                            evaluate_poly(p[2,:],1,timesCheck).^2)- # y
+        velCost = sum((sqrt(evaluate_poly(vec(p[1,:]),1,timesCheck).^2 + # x
+                            evaluate_poly(vec(p[2,:]),1,timesCheck).^2)- # y
                        tuning.max_vel).^2) ;                       # minus the max_vel and square
     end
     #Add a weight
@@ -680,9 +691,9 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
     #Add and accel cost
     #Sum the square errors in velocity magnitudes
     if(prob.isDim3)
-        accelCost = sum((sqrt(  evaluate_poly(p[1,:],2,timesCheck).^2  +  # x
-                                evaluate_poly(p[2,:],2,timesCheck ).^2 + # y
-                                evaluate_poly(p[3,:],2,timesCheck ).^2)- # z
+        accelCost = sum((sqrt(  evaluate_poly(vec(p[1,:]),2,timesCheck).^2  +  # x
+                                evaluate_poly(vec(p[2,:]),2,timesCheck ).^2 + # y
+                                evaluate_poly(vec(p[3,:]),2,timesCheck ).^2)- # z
                                 tuning.max_accel*tuning.percentAcc).^2); # minus the max_vel and square
     else
         accelCost = 0;
