@@ -1,5 +1,12 @@
 using PyPlot # So plots can be used
 
+
+# In case not a built-in. For compatability with 0.4.x
+function normalize!(x)
+    y=norm(x);
+    x = x./y;
+end
+
 #Classes/Objects without the functions
 #Convention Notes: 
 # In the future try to use matrices instead of separate arrays for similar values
@@ -443,6 +450,12 @@ end
 # t - the value(s) at which the derivative is evaluated at
 #Outputs
 # x - the value of the polynomial
+function evaluate_poly(coeffs::Array{Float64},deriv::Int64,t)
+    if(size(coeffs,1) == 1)
+        return evaluate_poly(vec(coeffs), deriv, t);
+    end
+    return [];
+end
 function evaluate_poly(coeffs::Vector{Float64}, deriv::Int64, t)
     #see how many coefficients there are
     p = length(coeffs);
