@@ -1,4 +1,4 @@
-## constructConstr!
+## constructConstr
 #Description - Create constraint matrices that follow convention and the desired order.
 #Assumptions
 # Every Polynomial will be made the same
@@ -102,7 +102,7 @@ function addDirectedSpeed!(prob::PathProblem, max_vel)
         prob.soft_constr = [prob.soft_constr[1]; true];
     else
         prob.end_config[1:(2+prob.isDim3),2] = max_vel_vec;
-        prob.soft_constr[2] = true;
+        #prob.soft_constr[2] = true;
     end
 end
 
@@ -473,7 +473,10 @@ function occupancy_get_id(x,y,z, problem1)
     width = problem1.grid_extent;
     res   = problem1.grid_resolution;
     n = round(Int64,ceil(width/res));
-    return sub2ind((n,n,n),floor(Int64,x/res)+1,floor(Int64,y/res)+1,floor(Int64,z/res)+1)
+    tempx = x
+    tempy = y
+    tempz = z
+    return sub2ind((n,n,n),floor(Int64,tempx/res)+1,floor(Int64,tempy/res)+1,floor(Int64,tempz/res)+1)
 end
 
 ## simpleVerifyFeas
@@ -522,7 +525,8 @@ function simpleVerifyFeas(sol::PathSol, tuning::TuningParams)
         end
         #Sqaure root the sum and compare
         totalSum = sqrt(totalSum);
-        timeProbv = [timeProbv; totalSum[find(totalSum .> max_lims[j]+tuning.precision)]];
+
+        timeProbv = [timeProbv; totalSum[find(totalSum .> max_lims[j]+tuning.precisionVel)]];
         timeProbm = [timeProbm; 0*find(totalSum .> max_lims[j]+tuning.precisionVel)+j]
     end
     return timeProbv, timeProbm;
@@ -575,9 +579,9 @@ function debugPlot(sol, prob, tuning)
     #First figure is position
     figure(1)
     if(prob.isDim3)
-        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+        plot3D(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
                 evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
-                evaluate_poly(sol.coeffs[3,:],0,plotTimes)) #z
+                evaluate_poly(sol.coeffs[3,:],0,plotTimes)); #z
         #Extra label for 3D: rad!
         zlabel("Z (m)")
     else
@@ -677,21 +681,16 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
     #Note that Vel cost is usually around order of 100 with a weight of 1
     velCost *= tuning.numericVelWeight;
     
-    #Add and accel cost
-    #Sum the square errors in velocity magnitudes
+    #Add an accel cost for going above the limit
+    #Sum the square errors in acceleration magnitudes
     if(prob.isDim3)
-        accelCost = sum((sqrt(  evaluate_poly(p[1,:],2,timesCheck).^2  +  # x
-                                evaluate_poly(p[2,:],2,timesCheck ).^2 + # y
-                                evaluate_poly(p[3,:],2,timesCheck ).^2)- # z
-                                tuning.max_accel*tuning.percentAcc).^2); # minus the max_vel and square
+        accelCostTemp = sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + evaluate_poly(p[2,:],2,timesCheck).^2 + evaluate_poly(p[3,:],2,timesCheck).^2)
     else
-        accelCost = 0;
+        accelCostTemp = sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + evaluate_poly(p[2,:],2,timesCheck).^2)
     end
-    #Add a cost for being above
-    temp = sqrt(evaluate_poly(p[1,:],2,timesCheck).^2 + evaluate_poly(p[2,:],2,timesCheck).^2)
-    accelCost += sum((temp -  tuning.max_accel*tuning.percentAcc).*(sign(temp - tuning.max_accel*tuning.percentAcc)+1));                       # minus the max_vel and square
+    #Add a cost for being above and a no cost for being below
+    accelCost = sum((accelCostTemp -  tuning.max_accel*tuning.percentAcc).*(sign(accelCostTemp  - tuning.max_accel*tuning.percentAcc)+1));                       # minus the max_vel and square
     #Add a weight
-    #Note that Vel cost is usually around order of 100 with a weight of 1
     accelCost *= tuning.accelWeight;
 
     #Create the soft costs? assuming soft costs are at the end
@@ -709,6 +708,7 @@ function costFunc(dF, sol::PathSol, prob::PathProblem, solvStuff::PolyPathSolver
     mapCost = tuning.obstacleWeight*sum(prob.costmap[sol.cells]);
 
     #Return the total cost
+    #println("Deriv: $derivCost, VelcCost: $velCost SoftCost: $softCosts Mapcost: $mapCost AccelCost: $accelCost")
     cost = derivCost + velCost + softCosts + mapCost+accelCost;
     return cost[1];
 end
@@ -780,7 +780,7 @@ function createCostMap(obstacles::Int64,prob::PathProblem)
         #Loop through and create
         for l = 1:size(costmap,1)
             for p = 1:size(costmap,2)
-                costmap[l,p,1] += 500/(sqrt((l-index1)^2+(p-index2)^2));
+                costmap[l,p,1] += 900/(sqrt((l-index1)^2+(p-index2)^2));
                 if(costmap[l,p,1]>255)
                     costmap[l,p,1] = 255;
                 end
@@ -808,7 +808,7 @@ function debugPlotDash(sol, prob, tuning)
     #First figure is position
     figure(1)
     if(prob.isDim3)
-        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+        plot3D(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
                 evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
                 evaluate_poly(sol.coeffs[3,:],0,plotTimes), #z
                 linestyle = "--");
@@ -926,7 +926,7 @@ function pathCellPlot(prob, sol, tuning)
             interpolation="none",
             extent=[0,prob.grid_extent,0,prob.grid_extent])
     if(prob.isDim3)
-        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+        plot3D(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
                 evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
                 evaluate_poly(sol.coeffs[3,:],0,plotTimes));#z
         #Extra label for 3D: rad!
@@ -950,7 +950,7 @@ function pathCellPlot(prob, sol, tuning)
             interpolation="none",
             extent=[0,prob.grid_extent,0,prob.grid_extent])
     if(prob.isDim3)
-        plot(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
+        plot3D(   evaluate_poly(sol.coeffs[1,:],0,plotTimes), #x
                 evaluate_poly(sol.coeffs[2,:],0,plotTimes), #y
                 evaluate_poly(sol.coeffs[3,:],0,plotTimes));#z
         #Extra label for 3D: rad!
@@ -1036,9 +1036,13 @@ function selfGradientDescent(sol::PathSol,prob::PathProblem,tuning::TuningParams
             end    
         end
         
-        #if(ratechange)
-        #Normalize the rat of change vector
-        gradDir = normalize!(rateChange)
+        if(all(rateChange .== 0.0))
+            gradDir = zeros(size(rateChange));
+        else
+            #Only Normalize the rate of change vector if possible
+            gradDir = normalize!(rateChange)
+        end
+        println(gradDir)
 
         #Perturb in the negative gradient direction
         for i = 1:rowFree

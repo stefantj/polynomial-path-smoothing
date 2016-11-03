@@ -1,7 +1,4 @@
 using PyPlot # So plots can be used
-using JuMP   # Setup using JuMP so that we have access to its methods
-using Optim  # For optim.jl use
-using Convex # For convex.jl.....hopefully it works
 
 #Classes/Objects without the functions
 #Convention Notes: 
@@ -638,6 +635,10 @@ function runPathPlanner(tuning::TuningParams,
         println("Path Planning Failed even with Restarts: Sad Face :(")
     end
 
+    #Calculate final cost
+    df = form_df(prob);
+    solution.cost = costFunc(df, solution, prob, solvHelp, tuning)
+    
     #Return path
     return solution;
 
